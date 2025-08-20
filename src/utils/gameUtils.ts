@@ -1,4 +1,6 @@
-import { GameState, Player, GamePiece, PlayerColor, Position, PLAYER_COLORS, START_POSITIONS, SAFE_SQUARES, HOME_POSITIONS, PIECES_PER_PLAYER, TOTAL_MAIN_SQUARES, HOME_COLUMN_SQUARES } from '@/types/game';
+
+import { GameState, Player, GamePiece, PlayerColor, Position, PLAYER_COLORS, HOME_POSITIONS, PIECES_PER_PLAYER, TOTAL_MAIN_SQUARES, HOME_COLUMN_SQUARES } from '@/types/game';
+import { getBoardPosition, getHomeColumnPosition, START_POSITIONS, SAFE_SQUARES } from './boardPositions';
 
 export const createInitialGameState = (playerCount: number): GameState => {
   const players: Player[] = PLAYER_COLORS.slice(0, playerCount).map((color, index) => ({
@@ -31,75 +33,26 @@ const createInitialPieces = (color: PlayerColor, playerIndex: number): GamePiece
     playerId: `player-${playerIndex}`,
     color,
     position: homePositions[i],
-    boardPosition: -1, // -1 means in home
+    boardPosition: -1,
     isInHome: true,
     isInHomeColumn: false,
     isFinished: false
   }));
 };
 
-export const getBoardPosition = (boardPosition: number): Position => {
-  if (boardPosition < 0) {
-    // In home, position will be set separately
-    return { x: 0, y: 0 };
-  }
-  
-  if (boardPosition >= TOTAL_MAIN_SQUARES) {
-    // In home column or finished
-    return getHomeColumnPosition(boardPosition - TOTAL_MAIN_SQUARES);
-  }
-  
-  // Main path positions
-  const side = Math.floor(boardPosition / 13);
-  const posInSide = boardPosition % 13;
-  
-  switch (side) {
-    case 0: // Bottom side (moving right)
-      return { x: posInSide + 1, y: 8 };
-    case 1: // Right side (moving up)
-      return { x: 8, y: 7 - posInSide };
-    case 2: // Top side (moving left)
-      return { x: 7 - posInSide, y: 6 };
-    case 3: // Left side (moving down)
-      return { x: 6, y: posInSide + 1 };
-    default:
-      return { x: 0, y: 0 };
-  }
-};
-
-const getHomeColumnPosition = (homeColumnPos: number): Position => {
-  if (homeColumnPos >= HOME_COLUMN_SQUARES) {
-    // Finished - center position
-    return { x: 7, y: 7 };
-  }
-  
-  // Home column positions (simplified - would need color-specific logic)
-  return { x: 7, y: 7 - homeColumnPos };
-};
-
 export const canMovePiece = (piece: GamePiece, diceValue: number): boolean => {
-  // Piece in home can only move out on a 6
+  if (piece.isFinished) return false;
+  
   if (piece.isInHome) {
     return diceValue === 6;
   }
   
-  // Piece finished cannot move
-  if (piece.isFinished) {
-    return false;
-  }
-  
-  // Check if move would overshoot finish
   if (piece.isInHomeColumn) {
-    const currentHomeColumnPos = piece.boardPosition - TOTAL_MAIN_SQUARES;
-    const newPos = currentHomeColumnPos + diceValue;
-    return newPos <= HOME_COLUMN_SQUARES; // Can land exactly on finish or before
+    const currentHomePos = piece.boardPosition - TOTAL_MAIN_SQUARES;
+    return currentHomePos + diceValue <= HOME_COLUMN_SQUARES;
   }
   
-  // Regular move on main path
-  const newBoardPosition = piece.boardPosition + diceValue;
-  const maxPosition = TOTAL_MAIN_SQUARES + HOME_COLUMN_SQUARES;
-  
-  return newBoardPosition <= maxPosition;
+  return true;
 };
 
 export const movePiece = (piece: GamePiece, diceValue: number, allPlayers: Player[]) => {
@@ -111,66 +64,66 @@ export const movePiece = (piece: GamePiece, diceValue: number, allPlayers: Playe
   let gameMessage = '';
   let capturedPieces: GamePiece[] = [];
 
-  if (piece.isInHome) {
-    // Moving out of home
+  if (piece.isInHome && diceValue === 6) {
+    // Move piece out of home
     newBoardPosition = START_POSITIONS[piece.color];
     newPosition = getBoardPosition(newBoardPosition);
     gameMessage = `${piece.color} piece entered the board!`;
   } else if (piece.isInHomeColumn) {
     // Moving in home column
-    const currentHomeColumnPos = piece.boardPosition - TOTAL_MAIN_SQUARES;
-    const newHomeColumnPos = currentHomeColumnPos + diceValue;
+    const currentHomePos = piece.boardPosition - TOTAL_MAIN_SQUARES;
+    const newHomePos = currentHomePos + diceValue;
     
-    if (newHomeColumnPos === HOME_COLUMN_SQUARES) {
-      // Reached finish
+    if (newHomePos === HOME_COLUMN_SQUARES) {
+      // Finished!
       newBoardPosition = TOTAL_MAIN_SQUARES + HOME_COLUMN_SQUARES;
-      newPosition = { x: 7, y: 7 }; // Center finish position
+      newPosition = { x: 7, y: 7 };
       isFinished = true;
       gameMessage = `${piece.color} piece reached home!`;
     } else {
       // Still in home column
-      newBoardPosition = TOTAL_MAIN_SQUARES + newHomeColumnPos;
-      newPosition = getHomeColumnPosition(newHomeColumnPos);
+      newBoardPosition = TOTAL_MAIN_SQUARES + newHomePos;
+      newPosition = getHomeColumnPosition(piece.color, newHomePos);
       isInHomeColumn = true;
       gameMessage = `${piece.color} piece moved in home column.`;
     }
   } else {
     // Moving on main path
-    newBoardPosition = piece.boardPosition + diceValue;
-    
-    // Check if entering home column
     const playerStartPos = START_POSITIONS[piece.color];
-    const fullCirclePos = playerStartPos + 51; // 51 squares to complete circle
+    let newMainPathPos = piece.boardPosition + diceValue;
     
-    if (newBoardPosition >= fullCirclePos) {
+    // Check if completing full circuit and entering home column
+    const distanceFromStart = (piece.boardPosition - playerStartPos + TOTAL_MAIN_SQUARES) % TOTAL_MAIN_SQUARES;
+    const newDistanceFromStart = distanceFromStart + diceValue;
+    
+    if (newDistanceFromStart >= 51) {
       // Enter home column
-      const homeColumnPos = newBoardPosition - fullCirclePos;
+      const homeColumnPos = newDistanceFromStart - 51;
       newBoardPosition = TOTAL_MAIN_SQUARES + homeColumnPos;
-      newPosition = getHomeColumnPosition(homeColumnPos);
+      newPosition = getHomeColumnPosition(piece.color, homeColumnPos);
       isInHomeColumn = true;
       gameMessage = `${piece.color} piece entered home column!`;
     } else {
       // Regular move on main path
-      if (newBoardPosition >= TOTAL_MAIN_SQUARES) {
-        newBoardPosition = newBoardPosition - TOTAL_MAIN_SQUARES;
-      }
+      newBoardPosition = newMainPathPos % TOTAL_MAIN_SQUARES;
       newPosition = getBoardPosition(newBoardPosition);
       gameMessage = `${piece.color} piece moved.`;
-    }
-  }
-
-  // Check for captures (only on main path, not on safe squares)
-  if (!isInHomeColumn && !isFinished && !SAFE_SQUARES.includes(newBoardPosition)) {
-    allPlayers.forEach(player => {
-      if (player.id !== piece.playerId) {
-        player.pieces.forEach(otherPiece => {
-          if (otherPiece.boardPosition === newBoardPosition && !otherPiece.isInHome && !otherPiece.isFinished) {
-            capturedPieces.push(otherPiece);
-            gameMessage += ` Captured ${otherPiece.color} piece!`;
+      
+      // Check for captures
+      if (!SAFE_SQUARES.includes(newBoardPosition)) {
+        allPlayers.forEach(player => {
+          if (player.id !== piece.playerId) {
+            player.pieces.forEach(otherPiece => {
+              if (otherPiece.boardPosition === newBoardPosition && 
+                  !otherPiece.isInHome && !otherPiece.isFinished) {
+                capturedPieces.push(otherPiece);
+                gameMessage += ` Captured ${otherPiece.color} piece!`;
+              }
+            });
           }
         });
       }
-    });
+    }
   }
 
   const newPiece: GamePiece = {
@@ -185,47 +138,52 @@ export const movePiece = (piece: GamePiece, diceValue: number, allPlayers: Playe
   return { newPiece, capturedPieces, gameMessage };
 };
 
-export const playSound = (soundType: 'dice' | 'move' | 'capture' | 'win' | 'enter') => {
-  // Simple audio feedback using Web Audio API
-  const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-  
-  const createTone = (frequency: number, duration: number, volume: number = 0.1) => {
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
-    
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
-    
-    oscillator.frequency.value = frequency;
-    oscillator.type = 'sine';
-    
-    gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + duration);
-    
-    oscillator.start(audioContext.currentTime);
-    oscillator.stop(audioContext.currentTime + duration);
-  };
+export { getBoardPosition, getHomeColumnPosition };
 
-  switch (soundType) {
-    case 'dice':
-      createTone(800, 0.1);
-      setTimeout(() => createTone(600, 0.1), 100);
-      break;
-    case 'move':
-      createTone(400, 0.2);
-      break;
-    case 'capture':
-      createTone(300, 0.3);
-      setTimeout(() => createTone(500, 0.2), 150);
-      break;
-    case 'enter':
-      createTone(600, 0.2);
-      setTimeout(() => createTone(800, 0.2), 100);
-      break;
-    case 'win':
-      [523, 659, 784, 1047].forEach((freq, i) => {
-        setTimeout(() => createTone(freq, 0.3), i * 150);
-      });
-      break;
+export const playSound = (soundType: 'dice' | 'move' | 'capture' | 'win' | 'enter') => {
+  try {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    
+    const createTone = (frequency: number, duration: number, volume: number = 0.1) => {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = frequency;
+      oscillator.type = 'sine';
+      
+      gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + duration);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + duration);
+    };
+
+    switch (soundType) {
+      case 'dice':
+        createTone(800, 0.1);
+        setTimeout(() => createTone(600, 0.1), 100);
+        break;
+      case 'move':
+        createTone(400, 0.2);
+        break;
+      case 'capture':
+        createTone(300, 0.3);
+        setTimeout(() => createTone(500, 0.2), 150);
+        break;
+      case 'enter':
+        createTone(600, 0.2);
+        setTimeout(() => createTone(800, 0.2), 100);
+        break;
+      case 'win':
+        [523, 659, 784, 1047].forEach((freq, i) => {
+          setTimeout(() => createTone(freq, 0.3), i * 150);
+        });
+        break;
+    }
+  } catch (error) {
+    console.log('Audio not available');
   }
 };

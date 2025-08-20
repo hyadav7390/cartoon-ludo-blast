@@ -1,3 +1,4 @@
+
 import { useState, useCallback, useEffect } from 'react';
 import { GameState, Player, GamePiece, PlayerColor, GameMove, PLAYER_COLORS, START_POSITIONS, SAFE_SQUARES, HOME_POSITIONS, PIECES_PER_PLAYER } from '@/types/game';
 import { getBoardPosition, canMovePiece, movePiece, createInitialGameState } from '@/utils/gameUtils';
@@ -12,7 +13,7 @@ export const useGameLogic = (playerCount: number = 4) => {
 
   // Timer logic
   useEffect(() => {
-    if (gameState.gameStatus === 'playing' && !gameState.isRolling && gameState.diceValue === null) {
+    if (gameState.gameStatus === 'playing' && gameState.diceValue === null && !gameState.isRolling) {
       const interval = setInterval(() => {
         setTurnTimer((prev) => {
           if (prev <= 1) {
@@ -40,7 +41,6 @@ export const useGameLogic = (playerCount: number = 4) => {
         skippedTurns: currentPlayer.skippedTurns + 1
       };
       
-      // Check if player should be eliminated (3 consecutive skips)
       if (updatedPlayer.skippedTurns >= 3) {
         const remainingPlayers = prev.players.filter(p => p.id !== currentPlayer.id);
         if (remainingPlayers.length === 1) {
@@ -74,7 +74,6 @@ export const useGameLogic = (playerCount: number = 4) => {
     setGameState(prev => ({ ...prev, isRolling: true, gameMessage: 'Rolling dice...' }));
     setTurnTimer(30);
 
-    // Simulate dice roll animation
     setTimeout(() => {
       const diceValue = Math.floor(Math.random() * 6) + 1;
       
@@ -82,7 +81,6 @@ export const useGameLogic = (playerCount: number = 4) => {
         const currentPlayer = prev.players[prev.currentPlayerIndex];
         const newConsecutiveSixes = diceValue === 6 ? prev.consecutiveSixes + 1 : 0;
         
-        // Handle three consecutive sixes rule
         if (newConsecutiveSixes === 3) {
           const nextPlayerIndex = (prev.currentPlayerIndex + 1) % prev.players.length;
           return {
@@ -103,7 +101,7 @@ export const useGameLogic = (playerCount: number = 4) => {
           gameMessage: `${currentPlayer.name} rolled ${diceValue}!`
         };
       });
-    }, 1200); // Match dice animation duration
+    }, 1200);
   }, [gameState.isRolling, gameState.diceValue]);
 
   const movePieceOnBoard = useCallback((pieceId: string) => {
@@ -119,17 +117,15 @@ export const useGameLogic = (playerCount: number = 4) => {
 
       const { newPiece, capturedPieces, gameMessage } = movePiece(piece, prev.diceValue!, prev.players);
       
-      // Update all players with new piece positions
       const updatedPlayers = prev.players.map(player => {
         if (player.id === currentPlayer.id) {
           return {
             ...player,
             pieces: player.pieces.map(p => p.id === pieceId ? newPiece : p),
-            skippedTurns: 0 // Reset skipped turns on successful move
+            skippedTurns: 0
           };
         }
         
-        // Handle captured pieces
         if (capturedPieces.length > 0) {
           const capturedPieceIds = capturedPieces.map(cp => cp.id);
           if (player.pieces.some(p => capturedPieceIds.includes(p.id))) {
@@ -147,7 +143,6 @@ export const useGameLogic = (playerCount: number = 4) => {
         return player;
       });
 
-      // Check if player won
       const playerPieces = updatedPlayers.find(p => p.id === currentPlayer.id)?.pieces || [];
       const finishedPieces = playerPieces.filter(p => p.isFinished);
       
@@ -162,7 +157,6 @@ export const useGameLogic = (playerCount: number = 4) => {
         };
       }
 
-      // Determine next turn
       const shouldGetAnotherTurn = prev.diceValue === 6 && prev.consecutiveSixes < 2;
       const nextPlayerIndex = shouldGetAnotherTurn 
         ? prev.currentPlayerIndex 
@@ -171,7 +165,7 @@ export const useGameLogic = (playerCount: number = 4) => {
       return {
         ...prev,
         players: updatedPlayers,
-        diceValue: shouldGetAnotherTurn ? null : null,
+        diceValue: null,
         currentPlayerIndex: nextPlayerIndex,
         consecutiveSixes: shouldGetAnotherTurn ? prev.consecutiveSixes : 0,
         gameMessage: shouldGetAnotherTurn 
