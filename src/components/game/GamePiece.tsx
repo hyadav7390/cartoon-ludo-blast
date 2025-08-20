@@ -21,7 +21,7 @@ export const GamePiece: React.FC<GamePieceProps> = ({
   const getStackOffset = () => {
     if (totalStack === 1) return { x: 0, y: 0 };
     
-    const radius = 6;
+    const radius = 8;
     const angle = (stackIndex * 2 * Math.PI) / totalStack;
     return {
       x: radius * Math.cos(angle),
@@ -34,52 +34,63 @@ export const GamePiece: React.FC<GamePieceProps> = ({
   const getColorClasses = (color: string) => {
     switch (color) {
       case 'red':
-        return 'bg-gradient-to-br from-red-400 to-red-600 border-red-700 shadow-red-200';
+        return 'bg-gradient-to-br from-red-400 via-red-500 to-red-600 border-red-700 shadow-red-300';
       case 'blue':
-        return 'bg-gradient-to-br from-blue-400 to-blue-600 border-blue-700 shadow-blue-200';
+        return 'bg-gradient-to-br from-blue-400 via-blue-500 to-blue-600 border-blue-700 shadow-blue-300';
       case 'green':
-        return 'bg-gradient-to-br from-green-400 to-green-600 border-green-700 shadow-green-200';
+        return 'bg-gradient-to-br from-green-400 via-green-500 to-green-600 border-green-700 shadow-green-300';
       case 'yellow':
-        return 'bg-gradient-to-br from-yellow-400 to-yellow-600 border-yellow-700 shadow-yellow-200';
+        return 'bg-gradient-to-br from-yellow-400 via-yellow-500 to-yellow-600 border-yellow-700 shadow-yellow-300';
       default:
-        return 'bg-gradient-to-br from-gray-400 to-gray-600 border-gray-700 shadow-gray-200';
+        return 'bg-gradient-to-br from-gray-400 to-gray-600 border-gray-700 shadow-gray-300';
     }
   };
 
   return (
     <div
       className={cn(
-        'absolute w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 rounded-full border-2 transition-all duration-300 transform-gpu',
+        'absolute w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 rounded-full border-3 transition-all duration-300 transform-gpu',
         getColorClasses(piece.color),
-        'shadow-lg',
-        isValid && 'cursor-pointer hover:scale-125 animate-pulse ring-2 ring-white ring-opacity-75',
-        !isValid && piece.isInHome && 'opacity-80',
-        !isValid && !piece.isInHome && 'cursor-not-allowed opacity-60'
+        'shadow-lg hover:shadow-xl',
+        isValid && 'cursor-pointer hover:scale-125 animate-pulse ring-4 ring-white ring-opacity-75 z-20',
+        !isValid && piece.isInHome && 'opacity-90 hover:opacity-100',
+        !isValid && !piece.isInHome && 'cursor-not-allowed opacity-80'
       )}
       style={{
-        left: `calc(50% - ${totalStack === 1 ? '12px' : '10px'} + ${stackOffset.x}px)`,
-        top: `calc(50% - ${totalStack === 1 ? '12px' : '10px'} + ${stackOffset.y}px)`,
+        left: `calc(50% - ${totalStack === 1 ? '16px' : '14px'} + ${stackOffset.x}px)`,
+        top: `calc(50% - ${totalStack === 1 ? '16px' : '14px'} + ${stackOffset.y}px)`,
         zIndex: 10 + stackIndex,
       }}
       onClick={isValid ? onClick : undefined}
     >
-      {/* Inner highlight */}
-      <div className="absolute inset-0.5 rounded-full bg-white/30 pointer-events-none" />
+      {/* Inner highlight for 3D effect */}
+      <div className="absolute inset-1 rounded-full bg-white/40 pointer-events-none" />
       
       {/* Piece number */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <span className="text-[8px] sm:text-[10px] font-bold text-white drop-shadow-sm">
+        <span className="text-xs sm:text-sm font-bold text-white drop-shadow-md">
           {parseInt(piece.id.split('-')[1]) + 1}
         </span>
       </div>
       
-      {/* Glow effect for valid moves */}
+      {/* Enhanced glow effect for valid moves */}
       {isValid && (
         <>
-          <div className="absolute -inset-1 rounded-full bg-white/40 animate-ping pointer-events-none" />
-          <div className="absolute -inset-0.5 rounded-full bg-white/60 pointer-events-none" />
+          <div className="absolute -inset-2 rounded-full bg-white/50 animate-ping pointer-events-none" />
+          <div className="absolute -inset-1 rounded-full bg-yellow-300/60 animate-pulse pointer-events-none" />
         </>
       )}
+
+      {/* Subtle animation for all pieces */}
+      <style jsx>{`
+        @keyframes piece-idle {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-1px); }
+        }
+        .piece-idle {
+          animation: piece-idle 3s ease-in-out infinite;
+        }
+      `}</style>
     </div>
   );
 };

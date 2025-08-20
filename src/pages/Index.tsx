@@ -1,7 +1,8 @@
+
 import { Game } from "@/components/game/Game";
 
 const Index = () => {
-  return <Game playerCount={4} />;
+  return <Game />;
 };
 
 export default Index;

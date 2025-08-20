@@ -1,7 +1,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { GameState, Player, GamePiece, PlayerColor, GameMove, PLAYER_COLORS, START_POSITIONS, SAFE_SQUARES, HOME_POSITIONS, PIECES_PER_PLAYER } from '@/types/game';
-import { getBoardPosition, canMovePiece, movePiece, createInitialGameState } from '@/utils/gameUtils';
+import { canMovePiece, movePiece, createInitialGameState } from '@/utils/gameUtils';
 
 export const useGameLogic = (playerCount: number = 4) => {
   const [gameState, setGameState] = useState<GameState>(() => 
@@ -205,6 +205,7 @@ export const useGameLogic = (playerCount: number = 4) => {
 
   return {
     gameState,
+    setGameState,
     turnTimer,
     rollDice,
     movePieceOnBoard,
