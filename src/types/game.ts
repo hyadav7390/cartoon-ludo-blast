@@ -75,13 +75,5 @@ export const HOME_POSITIONS: Record<PlayerColor, Position[]> = {
   ]
 };
 
-// Starting positions for each color on the main path
-export const START_POSITIONS: Record<PlayerColor, number> = {
-  red: 0,    // Red starts at position 0
-  blue: 13,  // Blue starts at position 13
-  green: 26, // Green starts at position 26
-  yellow: 39 // Yellow starts at position 39
-};
-
 // Safe squares (marked with stars)
 export const SAFE_SQUARES = [0, 8, 13, 21, 26, 34, 39, 47];

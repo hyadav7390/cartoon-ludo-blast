@@ -58,11 +58,11 @@ export const canMovePiece = (piece: GamePiece, diceValue: number): boolean => {
 export const movePiece = (piece: GamePiece, diceValue: number, allPlayers: Player[]) => {
   let newBoardPosition: number;
   let newPosition: Position;
-  let isInHome = false;
+  const isInHome = false;
   let isInHomeColumn = false;
   let isFinished = false;
   let gameMessage = '';
-  let capturedPieces: GamePiece[] = [];
+  const capturedPieces: GamePiece[] = [];
 
   if (piece.isInHome && diceValue === 6) {
     // Move piece out of home
@@ -90,7 +90,7 @@ export const movePiece = (piece: GamePiece, diceValue: number, allPlayers: Playe
   } else {
     // Moving on main path
     const playerStartPos = START_POSITIONS[piece.color];
-    let newMainPathPos = piece.boardPosition + diceValue;
+    const newMainPathPos = piece.boardPosition + diceValue;
     
     // Check if completing full circuit and entering home column
     const distanceFromStart = (piece.boardPosition - playerStartPos + TOTAL_MAIN_SQUARES) % TOTAL_MAIN_SQUARES;
@@ -142,7 +142,7 @@ export { getBoardPosition, getHomeColumnPosition };
 
 export const playSound = (soundType: 'dice' | 'move' | 'capture' | 'win' | 'enter') => {
   try {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
     
     const createTone = (frequency: number, duration: number, volume: number = 0.1) => {
       const oscillator = audioContext.createOscillator();

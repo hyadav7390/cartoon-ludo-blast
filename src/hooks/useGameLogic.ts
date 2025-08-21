@@ -1,6 +1,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
-import { GameState, Player, GamePiece, PlayerColor, GameMove, PLAYER_COLORS, START_POSITIONS, SAFE_SQUARES, HOME_POSITIONS, PIECES_PER_PLAYER } from '@/types/game';
+import { GameState, Player, GamePiece, PlayerColor, GameMove, PLAYER_COLORS, HOME_POSITIONS, PIECES_PER_PLAYER } from '@/types/game';
+import { START_POSITIONS, SAFE_SQUARES } from '@/utils/boardPositions';
 import { canMovePiece, movePiece, createInitialGameState } from '@/utils/gameUtils';
 
 export const useGameLogic = (playerCount: number = 4) => {
@@ -10,28 +11,6 @@ export const useGameLogic = (playerCount: number = 4) => {
 
   const [turnTimer, setTurnTimer] = useState<number>(30);
   const [timerInterval, setTimerInterval] = useState<NodeJS.Timeout | null>(null);
-
-  // Timer logic
-  useEffect(() => {
-    if (gameState.gameStatus === 'playing' && gameState.diceValue === null && !gameState.isRolling) {
-      const interval = setInterval(() => {
-        setTurnTimer((prev) => {
-          if (prev <= 1) {
-            skipTurn();
-            return 30;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-      setTimerInterval(interval);
-      return () => clearInterval(interval);
-    } else {
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        setTimerInterval(null);
-      }
-    }
-  }, [gameState.gameStatus, gameState.isRolling, gameState.diceValue, gameState.currentPlayerIndex]);
 
   const skipTurn = useCallback(() => {
     setGameState((prev) => {
@@ -68,6 +47,63 @@ export const useGameLogic = (playerCount: number = 4) => {
     setTurnTimer(30);
   }, []);
 
+  // Timer logic - fixed dependency issue
+  useEffect(() => {
+    if (gameState.gameStatus === 'playing' && gameState.diceValue === null && !gameState.isRolling) {
+      const interval = setInterval(() => {
+        setTurnTimer((prev) => {
+          if (prev <= 1) {
+            skipTurn();
+            return 30;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      setTimerInterval(interval);
+      return () => clearInterval(interval);
+    } else {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        setTimerInterval(null);
+      }
+    }
+  }, [gameState.gameStatus, gameState.isRolling, gameState.diceValue, gameState.currentPlayerIndex, skipTurn]);
+
+  // Auto-advance when no valid moves or only 1 valid move
+  useEffect(() => {
+    if (gameState.gameStatus === 'playing' && gameState.diceValue !== null) {
+      const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+      const validMoves = currentPlayer.pieces.filter(piece => canMovePiece(piece, gameState.diceValue!));
+      
+      if (validMoves.length === 0) {
+        // No valid moves - auto advance after 2 seconds
+        const timer = setTimeout(() => {
+          const nextPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
+          const nextPlayer = gameState.players[nextPlayerIndex];
+          
+          setGameState(prev => ({
+            ...prev,
+            diceValue: null,
+            currentPlayerIndex: nextPlayerIndex,
+            consecutiveSixes: 0,
+            gameMessage: `No valid moves. ${nextPlayer.name}'s turn.`
+          }));
+          setTurnTimer(30);
+        }, 2000);
+        
+        return () => clearTimeout(timer);
+      } else if (validMoves.length === 1) {
+        // Only 1 valid move - auto advance after 1 second
+        const timer = setTimeout(() => {
+          const pieceToMove = validMoves[0];
+          movePieceHandler(pieceToMove.id);
+        }, 1000);
+        
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [gameState.diceValue, gameState.gameStatus, gameState.currentPlayerIndex, gameState.players]);
+
   const rollDice = useCallback(() => {
     if (gameState.isRolling || gameState.diceValue !== null) return;
 
@@ -98,120 +134,119 @@ export const useGameLogic = (playerCount: number = 4) => {
           isRolling: false,
           diceValue,
           consecutiveSixes: newConsecutiveSixes,
-          gameMessage: `${currentPlayer.name} rolled ${diceValue}!`
+          gameMessage: `${currentPlayer.name} rolled a ${diceValue}.`
         };
       });
-    }, 1200);
-  }, [gameState.isRolling, gameState.diceValue]);
+    }, 1000);
+  }, [gameState.isRolling, gameState.diceValue, gameState.currentPlayerIndex, gameState.consecutiveSixes, gameState.players]);
 
-  const movePieceOnBoard = useCallback((pieceId: string) => {
-    if (!gameState.diceValue) return;
-
-    setGameState(prev => {
-      const currentPlayer = prev.players[prev.currentPlayerIndex];
-      const piece = currentPlayer.pieces.find(p => p.id === pieceId);
-      
-      if (!piece || !canMovePiece(piece, prev.diceValue!)) {
-        return prev;
+  const getValidMoves = useCallback((diceValue: number): string[] => {
+    if (!diceValue) return [];
+    
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+    const validMoves: string[] = [];
+    
+    currentPlayer.pieces.forEach(piece => {
+      if (canMovePiece(piece, diceValue)) {
+        validMoves.push(piece.id);
       }
+    });
+    
+    return validMoves;
+  }, [gameState.players, gameState.currentPlayerIndex]);
 
-      const { newPiece, capturedPieces, gameMessage } = movePiece(piece, prev.diceValue!, prev.players);
-      
+  const movePieceHandler = useCallback((pieceId: string) => {
+    if (!gameState.diceValue) return;
+    
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+    const piece = currentPlayer.pieces.find(p => p.id === pieceId);
+    
+    if (!piece || !canMovePiece(piece, gameState.diceValue)) return;
+    
+    const { newPiece, capturedPieces, gameMessage } = movePiece(piece, gameState.diceValue, gameState.players);
+    
+    setGameState(prev => {
+      // Update the moved piece
       const updatedPlayers = prev.players.map(player => {
         if (player.id === currentPlayer.id) {
           return {
             ...player,
-            pieces: player.pieces.map(p => p.id === pieceId ? newPiece : p),
-            skippedTurns: 0
+            pieces: player.pieces.map(p => p.id === pieceId ? newPiece : p)
           };
         }
-        
-        if (capturedPieces.length > 0) {
-          const capturedPieceIds = capturedPieces.map(cp => cp.id);
-          if (player.pieces.some(p => capturedPieceIds.includes(p.id))) {
-            return {
-              ...player,
-              pieces: player.pieces.map(p => 
-                capturedPieceIds.includes(p.id) 
-                  ? { ...p, boardPosition: -1, isInHome: true, isInHomeColumn: false, position: HOME_POSITIONS[p.color][parseInt(p.id.split('-')[1])] }
-                  : p
-              )
-            };
-          }
-        }
-        
         return player;
       });
-
-      const playerPieces = updatedPlayers.find(p => p.id === currentPlayer.id)?.pieces || [];
-      const finishedPieces = playerPieces.filter(p => p.isFinished);
+      
+      // Handle captured pieces
+      if (capturedPieces.length > 0) {
+        updatedPlayers.forEach(player => {
+          player.pieces.forEach(p => {
+            if (capturedPieces.some(captured => captured.id === p.id)) {
+              p.position = HOME_POSITIONS[p.color][parseInt(p.id.split('-')[1])];
+              p.boardPosition = -1;
+              p.isInHome = true;
+              p.isInHomeColumn = false;
+              p.isFinished = false;
+            }
+          });
+        });
+      }
+      
+      // Check for win condition
+      const updatedCurrentPlayer = updatedPlayers[gameState.currentPlayerIndex];
+      const finishedPieces = updatedCurrentPlayer.pieces.filter(p => p.isFinished);
       
       if (finishedPieces.length === PIECES_PER_PLAYER) {
         return {
           ...prev,
           players: updatedPlayers,
           gameStatus: 'finished',
-          winner: currentPlayer,
-          gameMessage: `🎉 ${currentPlayer.name} wins! 🎉`,
-          diceValue: null
+          winner: updatedCurrentPlayer,
+          diceValue: null,
+          gameMessage: `${updatedCurrentPlayer.name} wins the game!`
         };
       }
-
-      const shouldGetAnotherTurn = prev.diceValue === 6 && prev.consecutiveSixes < 2;
-      const nextPlayerIndex = shouldGetAnotherTurn 
-        ? prev.currentPlayerIndex 
-        : (prev.currentPlayerIndex + 1) % prev.players.length;
-
+      
+      // Determine next player
+      let nextPlayerIndex = gameState.currentPlayerIndex;
+      if (gameState.diceValue !== 6 || gameState.consecutiveSixes >= 2) {
+        nextPlayerIndex = (gameState.currentPlayerIndex + 1) % prev.players.length;
+      }
+      
       return {
         ...prev,
         players: updatedPlayers,
-        diceValue: null,
         currentPlayerIndex: nextPlayerIndex,
-        consecutiveSixes: shouldGetAnotherTurn ? prev.consecutiveSixes : 0,
-        gameMessage: shouldGetAnotherTurn 
-          ? `${gameMessage} Roll again!`
-          : `${gameMessage} ${prev.players[nextPlayerIndex].name}'s turn.`
+        diceValue: null,
+        consecutiveSixes: gameState.diceValue === 6 ? gameState.consecutiveSixes : 0,
+        gameMessage: gameMessage + (nextPlayerIndex !== gameState.currentPlayerIndex ? ` ${updatedPlayers[nextPlayerIndex].name}'s turn.` : ' Roll again!')
       };
     });
-    setTurnTimer(30);
-  }, [gameState.diceValue]);
-
-  const getValidMoves = useCallback((playerId: string): GamePiece[] => {
-    if (!gameState.diceValue) return [];
     
-    const player = gameState.players.find(p => p.id === playerId);
-    if (!player) return [];
-    
-    return player.pieces.filter(piece => canMovePiece(piece, gameState.diceValue!));
-  }, [gameState.diceValue, gameState.players]);
-
-  const resetGame = useCallback(() => {
-    setGameState(createInitialGameState(gameState.players.length));
     setTurnTimer(30);
-    if (timerInterval) {
-      clearInterval(timerInterval);
-      setTimerInterval(null);
-    }
-  }, [gameState.players.length, timerInterval]);
+  }, [gameState.diceValue, gameState.players, gameState.currentPlayerIndex, gameState.consecutiveSixes]);
 
   const startGame = useCallback(() => {
-    setGameState(prev => ({ 
-      ...prev, 
+    setGameState(prev => ({
+      ...prev,
       gameStatus: 'playing',
-      gameMessage: `${prev.players[0].name}'s turn. Roll the dice!`
+      gameMessage: 'Game started! Red player\'s turn.'
     }));
     setTurnTimer(30);
   }, []);
 
+  const resetGame = useCallback(() => {
+    setGameState(createInitialGameState(gameState.players.length));
+    setTurnTimer(30);
+  }, [gameState.players.length]);
+
   return {
     gameState,
-    setGameState,
     turnTimer,
     rollDice,
-    movePieceOnBoard,
+    movePieceHandler,
     getValidMoves,
-    resetGame,
     startGame,
-    skipTurn
+    resetGame
   };
 };

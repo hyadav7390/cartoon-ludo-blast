@@ -10,13 +10,13 @@ export const GameMessage: React.FC<GameMessageProps> = ({ message, type = 'info'
   const getMessageStyle = () => {
     switch (type) {
       case 'success':
-        return 'bg-success/20 text-success border-success/30';
+        return 'bg-gradient-to-br from-[hsl(var(--success))]/20 to-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/30';
       case 'warning':
-        return 'bg-warning/20 text-warning border-warning/30';
+        return 'bg-gradient-to-br from-[hsl(var(--warning))]/20 to-[hsl(var(--warning))]/10 text-[hsl(var(--warning))] border-[hsl(var(--warning))]/30';
       case 'error':
-        return 'bg-destructive/20 text-destructive border-destructive/30';
+        return 'bg-gradient-to-br from-[hsl(var(--destructive))]/20 to-[hsl(var(--destructive))]/10 text-[hsl(var(--destructive))] border-[hsl(var(--destructive))]/30';
       default:
-        return 'bg-primary/20 text-primary border-primary/30';
+        return 'bg-gradient-to-br from-[hsl(var(--accent))]/20 to-[hsl(var(--accent))]/10 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/30';
     }
   };
 
@@ -31,12 +31,12 @@ export const GameMessage: React.FC<GameMessageProps> = ({ message, type = 'info'
 
   return (
     <div className={cn(
-      'game-card border-2 text-center animate-fade-in-scale',
+      'game-card border-2 text-center rounded-lg p-3 shadow-md',
       getMessageStyle()
     )}>
       <div className="flex items-center justify-center space-x-2">
         <span className="text-lg">{getIcon()}</span>
-        <p className="font-semibold text-shadow">{message}</p>
+        <p className="font-semibold text-sm">{message}</p>
       </div>
     </div>
   );

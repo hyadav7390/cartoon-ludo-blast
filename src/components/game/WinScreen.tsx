@@ -15,49 +15,61 @@ export const WinScreen: React.FC<WinScreenProps> = ({ winner, onPlayAgain }) => 
 
   const getPlayerColorClass = (color: string) => {
     switch (color) {
-      case 'red': return 'text-player-red';
-      case 'blue': return 'text-player-blue';
-      case 'green': return 'text-player-green';
-      case 'yellow': return 'text-player-yellow';
-      default: return 'text-foreground';
+      case 'red': return 'text-red-100 bg-gradient-to-r from-red-700 to-red-800';
+      case 'blue': return 'text-blue-100 bg-gradient-to-r from-blue-700 to-blue-800';
+      case 'green': return 'text-green-100 bg-gradient-to-r from-green-700 to-green-800';
+      case 'yellow': return 'text-yellow-100 bg-gradient-to-r from-yellow-700 to-yellow-800';
+      default: return 'text-muted-foreground bg-gradient-to-r from-muted to-muted';
+    }
+  };
+
+  const getPlayerEmoji = (color: string) => {
+    switch (color) {
+      case 'red': return '🔴';
+      case 'blue': return '🔵';
+      case 'green': return '🟢';
+      case 'yellow': return '🟡';
+      default: return '⚪';
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="game-card max-w-md w-full text-center animate-bounce-in">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div className="game-card max-w-md w-full text-center">
         <div className="space-y-6">
-          {/* Celebration Animation */}
-          <div className="text-6xl animate-celebration">
+          {/* Celebration */}
+          <div className="text-5xl">
             🏆
           </div>
           
           {/* Winner Announcement */}
-          <div className="space-y-2">
-            <h1 className="text-3xl font-bold text-shadow animate-fade-in">
-              🎉 WINNER! 🎉
+          <div className="space-y-3">
+            <h1 className="text-3xl font-bold text-shadow">
+              WINNER!
             </h1>
-            <h2 className={cn(
-              'text-2xl font-bold text-shadow animate-slide-in-up',
+            <div className={cn(
+              'text-xl font-bold text-shadow rounded-lg p-3 text-white shadow-md border-2',
               getPlayerColorClass(winner.color)
             )}>
-              {winner.name}
-            </h2>
-            <p className="text-muted-foreground">
+              <div className="flex items-center justify-center space-x-2">
+                <span className="text-2xl">{getPlayerEmoji(winner.color)}</span>
+                <span>{winner.name}</span>
+              </div>
+            </div>
+            <p className="text-muted-foreground font-medium">
               Congratulations on your victory!
             </p>
           </div>
 
           {/* Fireworks Effect */}
-          <div className="relative h-16 overflow-hidden">
-            {Array.from({ length: 5 }, (_, i) => (
+          <div className="relative h-12 overflow-hidden">
+            {Array.from({ length: 6 }, (_, i) => (
               <div
                 key={i}
-                className="absolute animate-bounce-in opacity-75"
+                className="absolute opacity-75"
                 style={{
-                  left: `${20 + i * 15}%`,
-                  animationDelay: `${i * 0.2}s`,
-                  fontSize: `${1.5 + Math.random()}rem`,
+                  left: `${15 + i * 12}%`,
+                  fontSize: `${1.2 + Math.random()}rem`,
                 }}
               >
                 ✨
@@ -68,10 +80,10 @@ export const WinScreen: React.FC<WinScreenProps> = ({ winner, onPlayAgain }) => 
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <button
-              className="game-button success text-success-foreground"
+              className="game-button success"
               onClick={onPlayAgain}
             >
-              🎮 Play Again
+              Play Again
             </button>
           </div>
         </div>
