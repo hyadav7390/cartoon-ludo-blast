@@ -54,7 +54,7 @@ export const Game: React.FC<GameProps> = ({ playerCount: initialPlayerCount = 4 
   // Player selection screen
   if (selectedPlayerCount === null) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-[hsl(25_15%_8%)] to-[hsl(35_20%_12%)]">
+      <div className="min-h-screen flex items-center justify-center p-4 cartoon-stage">
         <div className="max-w-lg w-full text-center game-card">
           <div className="space-y-8">
             <div className="text-6xl">🎲</div>
@@ -88,7 +88,7 @@ export const Game: React.FC<GameProps> = ({ playerCount: initialPlayerCount = 4 
   // Waiting for game to start
   if (gameState.gameStatus === 'waiting') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-[hsl(25_15%_8%)] to-[hsl(35_20%_12%)]">
+      <div className="min-h-screen flex items-center justify-center p-4 cartoon-stage">
         <div className="max-w-2xl w-full text-center game-card">
           <div className="space-y-8">
             <div className="text-6xl">🎲</div>
@@ -143,7 +143,7 @@ export const Game: React.FC<GameProps> = ({ playerCount: initialPlayerCount = 4 
 
   // Main game
   return (
-    <div className="min-h-screen p-4 bg-gradient-to-br from-[hsl(25_15%_8%)] to-[hsl(35_20%_12%)]">
+    <div className="min-h-screen p-4 cartoon-stage">
       {/* Header */}
       <div className="max-w-7xl mx-auto mb-6">
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4">

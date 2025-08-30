@@ -77,7 +77,7 @@ export const movePiece = (piece: GamePiece, diceValue: number, allPlayers: Playe
     if (newHomePos === HOME_COLUMN_SQUARES) {
       // Finished!
       newBoardPosition = TOTAL_MAIN_SQUARES + HOME_COLUMN_SQUARES;
-      newPosition = { x: 7, y: 7 };
+      newPosition = { x: 7, y: 7 }; // Center finish
       isFinished = true;
       gameMessage = `${piece.color} piece reached home!`;
     } else {
@@ -90,22 +90,27 @@ export const movePiece = (piece: GamePiece, diceValue: number, allPlayers: Playe
   } else {
     // Moving on main path
     const playerStartPos = START_POSITIONS[piece.color];
-    const newMainPathPos = piece.boardPosition + diceValue;
+    const newMainPathPos = (piece.boardPosition + diceValue) % TOTAL_MAIN_SQUARES;
     
     // Check if completing full circuit and entering home column
-    const distanceFromStart = (piece.boardPosition - playerStartPos + TOTAL_MAIN_SQUARES) % TOTAL_MAIN_SQUARES;
-    const newDistanceFromStart = distanceFromStart + diceValue;
+    const normalizedPos = (piece.boardPosition >= playerStartPos) 
+      ? piece.boardPosition - playerStartPos 
+      : TOTAL_MAIN_SQUARES - playerStartPos + piece.boardPosition;
     
-    if (newDistanceFromStart >= 51) {
-      // Enter home column
-      const homeColumnPos = newDistanceFromStart - 51;
-      newBoardPosition = TOTAL_MAIN_SQUARES + homeColumnPos;
-      newPosition = getHomeColumnPosition(piece.color, homeColumnPos);
+    const wouldCompleteCircuit = normalizedPos + diceValue >= TOTAL_MAIN_SQUARES;
+    const wouldEnterHomeColumn = normalizedPos + diceValue >= TOTAL_MAIN_SQUARES - 6 && 
+                                normalizedPos < TOTAL_MAIN_SQUARES - 6;
+    
+    if (wouldEnterHomeColumn) {
+      // Calculate exact home column position
+      const stepsIntoHomeColumn = normalizedPos + diceValue - (TOTAL_MAIN_SQUARES - 6);
+      newBoardPosition = TOTAL_MAIN_SQUARES + stepsIntoHomeColumn;
+      newPosition = getHomeColumnPosition(piece.color, stepsIntoHomeColumn);
       isInHomeColumn = true;
       gameMessage = `${piece.color} piece entered home column!`;
     } else {
       // Regular move on main path
-      newBoardPosition = newMainPathPos % TOTAL_MAIN_SQUARES;
+      newBoardPosition = newMainPathPos;
       newPosition = getBoardPosition(newBoardPosition);
       gameMessage = `${piece.color} piece moved.`;
       
@@ -136,6 +141,41 @@ export const movePiece = (piece: GamePiece, diceValue: number, allPlayers: Playe
   };
 
   return { newPiece, capturedPieces, gameMessage };
+};
+
+// This function handles returning a captured piece to its home position
+export const getHomePositionForPiece = (piece: GamePiece): Position => {
+  // Get the center position based on color
+  let centerPosition: Position;
+  
+  switch(piece.color) {
+    case 'red':
+      centerPosition = { x: 3, y: 11 };
+      break;
+    case 'blue':
+      centerPosition = { x: 3, y: 3 };
+      break;
+    case 'green':
+      centerPosition = { x: 11, y: 3 };
+      break;
+    case 'yellow':
+      centerPosition = { x: 11, y: 11 };
+      break;
+  }
+  
+  // Use the piece index to determine position offset
+  const pieceIndex = parseInt(piece.id.split('-')[1]);
+  const offsets = [
+    { x: 0, y: 0 },
+    { x: 0.3, y: -0.3 },
+    { x: -0.3, y: -0.3 },
+    { x: -0.3, y: 0.3 }
+  ];
+  
+  return {
+    x: centerPosition.x + offsets[pieceIndex].x,
+    y: centerPosition.y + offsets[pieceIndex].y
+  };
 };
 
 export { getBoardPosition, getHomeColumnPosition };

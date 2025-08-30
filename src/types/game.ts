@@ -56,24 +56,25 @@ export const PIECES_PER_PLAYER = 4;
 
 export const PLAYER_COLORS: PlayerColor[] = ['red', 'blue', 'green', 'yellow'];
 
+// Placing pieces in home centers with specific offsets for each piece
 export const HOME_POSITIONS: Record<PlayerColor, Position[]> = {
-  red: [
-    { x: 1, y: 10 }, { x: 2, y: 10 },
-    { x: 1, y: 11 }, { x: 2, y: 11 }
-  ],
   blue: [
-    { x: 1, y: 3 }, { x: 2, y: 3 },
-    { x: 1, y: 4 }, { x: 2, y: 4 }
+    { x: 3, y: 3 }, { x: 3.3, y: 2.7 },
+    { x: 2.7, y: 2.7 }, { x: 2.7, y: 3.3 }
   ],
   green: [
-    { x: 12, y: 3 }, { x: 13, y: 3 },
-    { x: 12, y: 4 }, { x: 13, y: 4 }
+    { x: 11, y: 3 }, { x: 11.3, y: 2.7 },
+    { x: 10.7, y: 2.7 }, { x: 10.7, y: 3.3 }
   ],
   yellow: [
-    { x: 12, y: 10 }, { x: 13, y: 10 },
-    { x: 12, y: 11 }, { x: 13, y: 11 }
+    { x: 11, y: 11 }, { x: 11.3, y: 10.7 },
+    { x: 10.7, y: 10.7 }, { x: 10.7, y: 11.3 }
+  ],
+  red: [
+    { x: 3, y: 11 }, { x: 3.3, y: 10.7 },
+    { x: 2.7, y: 10.7 }, { x: 2.7, y: 11.3 }
   ]
 };
 
 // Safe squares (marked with stars)
-export const SAFE_SQUARES = [0, 8, 13, 21, 26, 34, 39, 47];
+export const SAFE_SQUARES = [0, 13, 26, 39, 8, 21, 34, 47];

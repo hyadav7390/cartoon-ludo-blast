@@ -15,10 +15,10 @@ export const PlayerIndicator: React.FC<PlayerIndicatorProps> = ({
 }) => {
   const getPlayerColorClass = (color: string) => {
     switch (color) {
-      case 'red': return 'border-red-600 text-red-100 bg-gradient-to-br from-red-800/50 to-red-900/50';
-      case 'blue': return 'border-blue-600 text-blue-100 bg-gradient-to-br from-blue-800/50 to-blue-900/50';
-      case 'green': return 'border-green-600 text-green-100 bg-gradient-to-br from-green-800/50 to-green-900/50';
-      case 'yellow': return 'border-yellow-600 text-yellow-100 bg-gradient-to-br from-yellow-800/50 to-yellow-900/50';
+      case 'red': return 'border-red-300 text-red-700 bg-red-50';
+      case 'blue': return 'border-blue-300 text-blue-700 bg-blue-50';
+      case 'green': return 'border-green-300 text-green-700 bg-green-50';
+      case 'yellow': return 'border-yellow-300 text-yellow-700 bg-yellow-50';
       default: return 'border-muted text-muted-foreground';
     }
   };
@@ -55,7 +55,7 @@ export const PlayerIndicator: React.FC<PlayerIndicatorProps> = ({
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className={cn(
-            'w-8 h-8 rounded-full border-2 flex items-center justify-center text-lg font-bold shadow-md bg-[hsl(var(--card))]',
+            'w-8 h-8 rounded-full border-2 flex items-center justify-center text-lg font-bold shadow-md bg-white',
             getPlayerColorClass(player.color)
           )}>
             {getPlayerAvatar(player.color)}
@@ -72,7 +72,7 @@ export const PlayerIndicator: React.FC<PlayerIndicatorProps> = ({
           <div className="flex flex-col items-center">
             <div className={cn(
               'text-sm font-bold transition-all duration-300',
-              timer <= 10 && 'text-red-400 scale-110'
+              timer <= 10 && 'text-red-500 scale-110'
             )}>
               {timer}s
             </div>

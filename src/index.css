@@ -3,99 +3,98 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Vintage Ludo Game Design System - Professional and Clean */
+/* Cartoon Ludo Blast Design System - Bright, Playful, Professional */
 
 @layer base {
   :root {
-    /* Vintage Color Palette */
-    --background: 25 15% 8%; /* Dark wooden brown */
-    --foreground: 45 15% 95%; /* Off-white text */
+    /* Cartoon Color Palette */
+    --background: 204 80% 92%; /* Sky blue */
+    --foreground: 220 25% 15%; /* Deep navy text */
     
     /* Board Colors */
-    --board-bg: 35 25% 15%; /* Darker wooden brown */
-    --board-border: 25 20% 12%; /* Dark brown border */
-    --board-cell-light: 45 20% 85%; /* Light beige */
-    --board-cell-dark: 35 15% 75%; /* Darker beige */
+    --board-bg: 0 0% 100%; /* White board */
+    --board-border: 203 70% 70%; /* Soft sky border */
+    --board-cell-light: 0 0% 100%; /* White cell */
+    --board-cell-dark: 200 40% 96%; /* Very light blue cell */
     
-    /* Player Colors - Traditional Ludo Colors */
-    --player-red: 0 70% 50%;
-    --player-red-light: 0 60% 60%;
-    --player-blue: 220 70% 50%;
-    --player-blue-light: 220 60% 60%;
-    --player-green: 120 70% 40%;
-    --player-green-light: 120 60% 50%;
-    --player-yellow: 45 80% 55%;
-    --player-yellow-light: 45 70% 65%;
+    /* Player Colors - Bright Pastels */
+    --player-red: 0 85% 62%;
+    --player-red-light: 0 95% 80%;
+    --player-blue: 215 90% 55%;
+    --player-blue-light: 215 95% 80%;
+    --player-green: 150 70% 50%;
+    --player-green-light: 150 85% 78%;
+    --player-yellow: 45 95% 60%;
+    --player-yellow-light: 45 95% 80%;
 
     /* UI Elements */
-    --card: 35 20% 20%; /* Panel background */
-    --card-foreground: 45 15% 95%;
-    --card-border: 25 15% 15%;
+    --card: 0 0% 100%; /* White cards */
+    --card-foreground: 220 25% 15%;
+    --card-border: 204 40% 80%;
 
-    --primary: 45 70% 55%; /* Gold/yellow for buttons */
-    --primary-foreground: 25 15% 8%;
-    --primary-hover: 45 60% 45%;
+    --primary: 340 85% 60%; /* Pink */
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 340 85% 50%;
 
-    --secondary: 35 25% 25%;
-    --secondary-foreground: 45 15% 95%;
+    --secondary: 200 60% 92%;
+    --secondary-foreground: 220 25% 15%;
 
-    --muted: 35 20% 30%;
-    --muted-foreground: 45 15% 70%;
+    --muted: 204 40% 85%;
+    --muted-foreground: 220 15% 35%;
 
-    --accent: 25 60% 45%;
-    --accent-foreground: 45 15% 95%;
+    --accent: 40 95% 60%;
+    --accent-foreground: 20 20% 15%;
 
-    --success: 120 50% 40%;
-    --success-foreground: 45 15% 95%;
+    --success: 150 70% 45%;
+    --success-foreground: 0 0% 100%;
 
-    --warning: 45 70% 55%;
-    --warning-foreground: 25 15% 8%;
+    --warning: 45 95% 55%;
+    --warning-foreground: 20 20% 15%;
 
-    --destructive: 0 60% 45%;
-    --destructive-foreground: 45 15% 95%;
+    --destructive: 0 75% 55%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 25 15% 15%;
-    --input: 35 20% 25%;
-    --ring: 45 70% 55%;
+    --border: 204 40% 75%;
+    --input: 0 0% 100%;
+    --ring: 340 85% 60%;
 
-    --radius: 0.75rem;
+    --radius: 1rem;
 
     /* Gradients */
-    --gradient-bg: linear-gradient(135deg, hsl(25 15% 8%), hsl(35 20% 12%));
-    --gradient-board: linear-gradient(145deg, hsl(35 25% 15%), hsl(25 20% 12%));
-    --gradient-card: linear-gradient(145deg, hsl(35 20% 20%), hsl(35 15% 18%));
-    --gradient-primary: linear-gradient(135deg, hsl(45 70% 55%), hsl(45 60% 45%));
+    --gradient-bg: radial-gradient(1200px 800px at 10% 20%, hsl(200 80% 95%), transparent 60%),
+                   radial-gradient(1000px 600px at 90% 10%, hsl(195 80% 96%), transparent 60%),
+                   linear-gradient(180deg, hsl(204 80% 92%), hsl(200 80% 90%));
+    --gradient-board: linear-gradient(145deg, hsl(0 0% 100%), hsl(200 40% 97%));
+    --gradient-card: linear-gradient(145deg, hsl(0 0% 100%), hsl(204 40% 96%));
+    --gradient-primary: linear-gradient(135deg, hsl(340 85% 60%), hsl(340 85% 50%));
 
     /* Shadows */
-    --shadow-soft: 0 2px 8px -2px hsl(0 0% 0% / 0.4);
-    --shadow-medium: 0 4px 16px -4px hsl(0 0% 0% / 0.5);
-    --shadow-strong: 0 8px 32px -8px hsl(0 0% 0% / 0.6);
-    --shadow-inset: inset 0 2px 4px hsl(0 0% 0% / 0.2);
-
-    /* Animations */
-    --dice-duration: 1.2s;
+    --shadow-soft: 0 4px 10px -4px hsl(210 40% 30% / 0.25);
+    --shadow-medium: 0 8px 20px -6px hsl(210 40% 30% / 0.3);
+    --shadow-strong: 0 16px 40px -10px hsl(210 40% 30% / 0.35);
+    --shadow-inset: inset 0 2px 6px hsl(210 20% 20% / 0.08);
   }
 
   .dark {
-    --background: 25 15% 8%;
-    --foreground: 45 15% 95%;
-    --card: 35 20% 20%;
-    --card-foreground: 45 15% 95%;
-    --popover: 35 20% 20%;
-    --popover-foreground: 45 15% 95%;
-    --primary: 45 70% 55%;
-    --primary-foreground: 25 15% 8%;
-    --secondary: 35 25% 25%;
-    --secondary-foreground: 45 15% 95%;
-    --muted: 35 20% 30%;
-    --muted-foreground: 45 15% 70%;
-    --accent: 25 60% 45%;
-    --accent-foreground: 45 15% 95%;
-    --destructive: 0 60% 45%;
-    --destructive-foreground: 45 15% 95%;
-    --border: 25 15% 15%;
-    --input: 35 20% 25%;
-    --ring: 45 70% 55%;
+    --background: 210 65% 12%;
+    --foreground: 210 30% 98%;
+    --card: 210 25% 16%;
+    --card-foreground: 210 30% 98%;
+    --popover: 210 25% 16%;
+    --popover-foreground: 210 30% 98%;
+    --primary: 340 85% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 30% 20%;
+    --secondary-foreground: 210 30% 98%;
+    --muted: 210 25% 24%;
+    --muted-foreground: 210 20% 70%;
+    --accent: 40 95% 60%;
+    --accent-foreground: 20 20% 15%;
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 25% 24%;
+    --input: 210 25% 24%;
+    --ring: 340 85% 60%;
   }
 }
 
@@ -113,21 +112,32 @@
 }
 
 @layer components {
+  /* Scene background for game screens */
+  .cartoon-stage {
+    /* background: var(--gradient-bg); */
+    background-image: url('./bg.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+
   /* Game Board Styling */
   .game-board {
-    @apply relative bg-gradient-to-br from-[hsl(var(--board-bg))] to-[hsl(var(--board-border))];
+    @apply relative;
+    background: var(--gradient-board);
     box-shadow: var(--shadow-strong);
-    border-radius: 1rem;
-    border: 3px solid hsl(var(--board-border));
+    border-radius: 1.25rem;
+    border: 4px solid hsl(var(--board-border));
   }
 
   .board-square {
-    @apply relative transition-all duration-200 border border-[hsl(var(--border))];
+    @apply relative transition-all duration-200 border rounded-md;
+    border-width: 2px;
     background: linear-gradient(145deg, hsl(var(--board-cell-light)) 0%, hsl(var(--board-cell-dark)) 100%);
   }
 
   .board-square:hover {
-    transform: scale(1.02);
+    transform: translateY(-1px);
     box-shadow: var(--shadow-inset);
   }
 
@@ -136,15 +146,16 @@
   }
 
   .board-square.center-finish {
-    @apply bg-gradient-to-br from-[hsl(var(--accent))] to-[hsl(var(--accent-foreground))];
+    @apply rounded-lg;
+    background: radial-gradient(circle at 50% 50%, #fff6, transparent 60%), linear-gradient(135deg, #fde68a, #fca5a5, #93c5fd);
     box-shadow: var(--shadow-inset);
   }
 
-  /* Player Pieces */
+  /* Player Pieces (unused class, kept for future) */
   .game-piece {
     @apply absolute rounded-full transition-all duration-300 cursor-pointer;
     box-shadow: var(--shadow-soft);
-    border: 2px solid hsl(var(--border));
+    border: 3px solid #fff;
   }
 
   .game-piece:hover {
@@ -152,41 +163,19 @@
     box-shadow: var(--shadow-medium);
   }
 
-  .game-piece.red {
-    @apply bg-gradient-to-br from-[hsl(var(--player-red-light))] to-[hsl(var(--player-red))];
-    border: 2px solid hsl(var(--player-red));
-  }
-
-  .game-piece.blue {
-    @apply bg-gradient-to-br from-[hsl(var(--player-blue-light))] to-[hsl(var(--player-blue))];
-    border: 2px solid hsl(var(--player-blue));
-  }
-
-  .game-piece.green {
-    @apply bg-gradient-to-br from-[hsl(var(--player-green-light))] to-[hsl(var(--player-green))];
-    border: 2px solid hsl(var(--player-green));
-  }
-
-  .game-piece.yellow {
-    @apply bg-gradient-to-br from-[hsl(var(--player-yellow-light))] to-[hsl(var(--player-yellow))];
-    border: 2px solid hsl(var(--player-yellow));
-  }
-
-  .game-piece.active {
-    box-shadow: 0 0 0 3px hsl(var(--primary) / 0.5);
-  }
-
   /* Dice Component */
   .dice-container {
-    @apply relative bg-gradient-to-br from-[hsl(var(--card))] to-[hsl(var(--card-border))] rounded-xl p-4;
+    @apply relative rounded-xl p-4;
+    background: var(--gradient-card);
     box-shadow: var(--shadow-medium);
-    border: 2px solid hsl(var(--border));
+    border: 3px solid hsl(var(--border));
   }
 
   .dice {
-    @apply relative bg-gradient-to-br from-[hsl(var(--board-cell-light))] to-[hsl(var(--board-cell-dark))] rounded-lg;
+    @apply relative rounded-xl;
+    background: linear-gradient(145deg, #ffffff, #eef6ff);
     box-shadow: var(--shadow-soft);
-    border: 2px solid hsl(var(--border));
+    border: 3px solid hsl(var(--border));
   }
 
   .dice.rolling {
@@ -195,29 +184,31 @@
 
   /* UI Cards */
   .game-card {
-    @apply bg-gradient-to-br from-[hsl(var(--card))] to-[hsl(var(--card-border))] rounded-xl p-4;
+    @apply rounded-xl p-4;
+    background: var(--gradient-card);
     box-shadow: var(--shadow-medium);
-    border: 2px solid hsl(var(--border));
+    border: 3px solid hsl(var(--border));
   }
 
   .player-indicator {
     @apply rounded-xl p-3 transition-all duration-300;
     background: var(--gradient-card);
     box-shadow: var(--shadow-soft);
-    border: 2px solid hsl(var(--border));
+    border: 3px solid hsl(var(--border));
   }
 
   .player-indicator.active {
-    box-shadow: 0 0 0 3px hsl(var(--primary) / 0.5);
+    box-shadow: 0 0 0 4px hsl(var(--primary) / 0.35);
     transform: scale(1.02);
   }
 
   /* Buttons */
   .game-button {
-    @apply px-6 py-3 rounded-lg font-bold text-lg transition-all duration-300;
+    @apply px-6 py-3 rounded-xl font-bold text-lg transition-all duration-300;
     background: var(--gradient-primary);
+    color: hsl(var(--primary-foreground));
     box-shadow: var(--shadow-soft);
-    border: 2px solid hsl(var(--border));
+    border: 3px solid hsl(var(--border));
   }
 
   .game-button:hover {
@@ -245,9 +236,13 @@
     100% { transform: rotate(360deg) scale(1); }
   }
 
+  .animate-dice-roll {
+    animation: dice-roll 0.6s linear;
+  }
+
   /* Utility Classes */
   .text-shadow {
-    text-shadow: 2px 2px 4px hsl(0 0% 0% / 0.3);
+    text-shadow: 2px 2px 4px hsl(210 30% 20% / 0.2);
   }
 
   .glass-effect {
@@ -255,7 +250,6 @@
     background: hsl(var(--card) / 0.8);
   }
 
-  /* Enhanced hover effects */
   .hover-lift {
     transition: transform 0.3s ease, box-shadow 0.3s ease;
   }
@@ -265,12 +259,11 @@
     box-shadow: var(--shadow-medium);
   }
 
-  /* Glow effects */
   .glow-primary {
-    box-shadow: 0 0 20px hsl(var(--primary) / 0.3);
+    box-shadow: 0 0 24px hsl(var(--primary) / 0.35);
   }
 
   .glow-success {
-    box-shadow: 0 0 20px hsl(var(--success) / 0.3);
+    box-shadow: 0 0 24px hsl(var(--success) / 0.35);
   }
 }

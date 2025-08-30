@@ -2,55 +2,52 @@ import { Position, PlayerColor } from '@/types/game';
 
 export const BOARD_SIZE = 15;
 
-// Define the main path positions for the Ludo board
-// Following the traditional Ludo path: Red -> Blue -> Green -> Yellow
+// Traditional Ludo main path - 52 squares in clockwise direction
 export const MAIN_PATH_POSITIONS: Position[] = [
-  // Red start and path (positions 0-17)
-  { x: 6, y: 13 }, // Red start
-  { x: 6, y: 12 }, { x: 6, y: 11 }, { x: 6, y: 10 }, { x: 6, y: 9 }, { x: 6, y: 8 },
-  { x: 5, y: 8 }, { x: 4, y: 8 }, { x: 3, y: 8 }, { x: 2, y: 8 }, { x: 1, y: 8 }, { x: 0, y: 8 },
-  { x: 0, y: 7 }, { x: 1, y: 7 }, { x: 2, y: 7 }, { x: 3, y: 7 }, { x: 4, y: 7 }, { x: 5, y: 7 },
-  
-  // Blue start and path (positions 18-35)
-  { x: 6, y: 7 }, { x: 6, y: 6 }, { x: 6, y: 5 }, { x: 6, y: 4 }, { x: 6, y: 3 }, { x: 6, y: 2 }, // Blue start
-  { x: 6, y: 1 }, { x: 6, y: 0 }, { x: 7, y: 0 }, { x: 8, y: 0 }, { x: 8, y: 1 }, { x: 8, y: 2 },
-  { x: 8, y: 3 }, { x: 8, y: 4 }, { x: 8, y: 5 }, { x: 8, y: 6 }, { x: 8, y: 7 }, { x: 9, y: 7 },
-  
-  // Green start and path (positions 36-53)
-  { x: 10, y: 7 }, { x: 11, y: 7 }, { x: 12, y: 7 }, { x: 13, y: 7 }, { x: 14, y: 7 }, { x: 14, y: 8 }, // Green start
-  { x: 13, y: 8 }, { x: 12, y: 8 }, { x: 11, y: 8 }, { x: 10, y: 8 }, { x: 9, y: 8 }, { x: 8, y: 8 },
-  { x: 8, y: 9 }, { x: 8, y: 10 }, { x: 8, y: 11 }, { x: 8, y: 12 }, { x: 8, y: 13 }, { x: 7, y: 13 }
+  // Blue section: Start at (1,6) and move clockwise
+  { x: 1, y: 6 }, { x: 2, y: 6 }, { x: 3, y: 6 }, { x: 4, y: 6 }, { x: 5, y: 6 },
+  { x: 6, y: 5 }, { x: 6, y: 4 }, { x: 6, y: 3 }, { x: 6, y: 2 }, { x: 6, y: 1 },
+  { x: 6, y: 0 }, { x: 7, y: 0 }, { x: 8, y: 0 }, 
+  // Green start at index 13 (corrected to 8,1)
+  { x: 8, y: 1 }, { x: 8, y: 2 }, { x: 8, y: 3 }, { x: 8, y: 4 }, { x: 8, y: 5 },
+  { x: 9, y: 6 }, { x: 10, y: 6 }, { x: 11, y: 6 }, { x: 12, y: 6 }, { x: 13, y: 6 },
+  { x: 14, y: 6 }, { x: 14, y: 7 }, { x: 14, y: 8 }, // Yellow start at index 26
+  { x: 13, y: 8 }, { x: 12, y: 8 }, { x: 11, y: 8 }, { x: 10, y: 8 }, { x: 9, y: 8 },
+  { x: 8, y: 9 }, { x: 8, y: 10 }, { x: 8, y: 11 }, { x: 8, y: 12 }, { x: 8, y: 13 },
+  { x: 8, y: 14 }, { x: 7, y: 14 }, { x: 6, y: 14 }, // Red start at index 39
+  { x: 6, y: 13 }, { x: 6, y: 12 }, { x: 6, y: 11 }, { x: 6, y: 10 }, { x: 6, y: 9 },
+  { x: 5, y: 8 }, { x: 4, y: 8 }, { x: 3, y: 8 }, { x: 2, y: 8 }, { x: 1, y: 8 },
+  { x: 0, y: 8 }, { x: 0, y: 7 }, { x: 0, y: 6 } // Back to Blue start
 ];
 
 // Starting positions for each color on the main path
 export const START_POSITIONS: Record<PlayerColor, number> = {
-  red: 0,    // Red starts at position 0 (x: 6, y: 13)
-  blue: 18,  // Blue starts at position 18 (x: 6, y: 2)
-  green: 36, // Green starts at position 36 (x: 14, y: 8)
-  yellow: 48 // Yellow starts at position 48 (x: 8, y: 12)
+  blue: 0,   // Blue starts at position 0 (1, 6)
+  green: 13, // Green starts at position 13 (8, 1)
+  yellow: 26, // Yellow starts at position 26 (14, 8)
+  red: 39    // Red starts at position 39 (6, 14)
 };
 
-// Safe squares (marked with stars) - 8 total safe positions
-// 4 start positions + 4 additional safe tiles
-export const SAFE_SQUARES = [0, 8, 18, 26, 36, 44, 48, 56];
+// Safe squares (8 total: 4 start positions + 4 additional safe squares)
+export const SAFE_SQUARES = [0, 13, 26, 39, 8, 21, 34, 47];
 
-// Home column positions for each color - these connect the start positions to the center
+// Home column positions for each color
 export const HOME_COLUMN_POSITIONS: Record<PlayerColor, Position[]> = {
-  red: [
-    { x: 7, y: 12 }, { x: 7, y: 11 }, { x: 7, y: 10 }, 
-    { x: 7, y: 9 }, { x: 7, y: 8 }, { x: 7, y: 7 }
-  ],
   blue: [
-    { x: 7, y: 6 }, { x: 7, y: 5 }, { x: 7, y: 4 }, 
-    { x: 7, y: 3 }, { x: 7, y: 2 }, { x: 7, y: 1 }
+    { x: 1, y: 7 }, { x: 2, y: 7 }, { x: 3, y: 7 }, 
+    { x: 4, y: 7 }, { x: 5, y: 7 }, { x: 7, y: 7 }
   ],
   green: [
-    { x: 9, y: 6 }, { x: 10, y: 6 }, { x: 11, y: 6 }, 
-    { x: 12, y: 6 }, { x: 13, y: 6 }, { x: 7, y: 7 }
+    { x: 7, y: 1 }, { x: 7, y: 2 }, { x: 7, y: 3 }, 
+    { x: 7, y: 4 }, { x: 7, y: 5 }, { x: 7, y: 7 }
   ],
   yellow: [
-    { x: 7, y: 9 }, { x: 7, y: 10 }, { x: 7, y: 11 }, 
-    { x: 7, y: 12 }, { x: 7, y: 13 }, { x: 7, y: 7 }
+    { x: 13, y: 7 }, { x: 12, y: 7 }, { x: 11, y: 7 }, 
+    { x: 10, y: 7 }, { x: 9, y: 7 }, { x: 7, y: 7 }
+  ],
+  red: [
+    { x: 7, y: 13 }, { x: 7, y: 12 }, { x: 7, y: 11 }, 
+    { x: 7, y: 10 }, { x: 7, y: 9 }, { x: 7, y: 7 }
   ]
 };
 
@@ -72,4 +69,4 @@ export const getHomeColumnPosition = (color: PlayerColor, columnPosition: number
     return { x: 7, y: 7 }; // Center finish
   }
   return positions[columnPosition];
-}; 
+};

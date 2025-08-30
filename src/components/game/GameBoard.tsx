@@ -1,7 +1,8 @@
 import React from 'react';
-import { GameState, Position, BOARD_SIZE } from '@/types/game';
+import { GameState, BOARD_SIZE, PlayerColor } from '@/types/game';
 import { GamePiece } from './GamePiece';
 import { cn } from '@/lib/utils';
+import { MAIN_PATH_POSITIONS, HOME_COLUMN_POSITIONS } from '@/utils/boardPositions';
 
 interface GameBoardProps {
   gameState: GameState;
@@ -14,119 +15,72 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   onPieceClick, 
   validMoves 
 }) => {
-  // Main path: Classic Ludo cross, with arms and home columns free
-  const isMainPathSquare = (x: number, y: number): boolean => {
-    // Vertical cross (excluding home columns, which is from (7,2)-(7,6), (7,8)-(7,12))
-    const isVertical = x === 7 && (
-      (y >= 0 && y <= 5) ||               // Blue arm
-      (y >= 9 && y <= 14) ||              // Red arm
-      (y === 7) ||                        // Center cross
-      (y === 6 || y === 8)                // arm boundaries
-    );
-    // Horizontal cross (excluding home columns, which is from (2,7)-(6,7), (8,7)-(12,7))
-    const isHorizontal = y === 7 && (
-      (x >= 0 && x <= 5) ||               // Green arm
-      (x >= 9 && x <= 14) ||              // Yellow arm
-      (x === 7) ||                        // Center cross
-      (x === 6 || x === 8)                // arm boundaries
-    );
-    return isVertical || isHorizontal;
+  // Precompute visible path and home column squares from board mapping
+  const pathKeySet = React.useMemo(() => new Set(MAIN_PATH_POSITIONS.map(p => `${p.x},${p.y}`)), []);
+  const homeColumnKeyToColor = React.useMemo(() => {
+    const map = new Map<string, PlayerColor>();
+    (['blue','green','yellow','red'] as PlayerColor[]).forEach((color) => {
+      HOME_COLUMN_POSITIONS[color].forEach(pos => {
+        map.set(`${pos.x},${pos.y}`, color);
+      });
+    });
+    return map;
+  }, []);
+
+  const isCenterArea = (x: number, y: number): boolean => x >= 6 && x <= 8 && y >= 6 && y <= 8;
+
+  const getHomeBgClasses = (color: PlayerColor) => {
+    switch (color) {
+      case 'blue': return 'bg-blue-100 border-blue-200';
+      case 'green': return 'bg-green-100 border-green-200';
+      case 'yellow': return 'bg-yellow-100 border-yellow-200';
+      case 'red': return 'bg-red-100 border-red-200';
+    }
   };
 
-  // Home areas: Classic 6x6 corners
-  const isHomeArea = (x: number, y: number): { isHome: boolean; color?: string } => {
-    if (x >= 0 && x <= 5 && y >= 0 && y <= 5) return { isHome: true, color: 'blue' };
-    if (x >= 9 && x <= 14 && y >= 0 && y <= 5) return { isHome: true, color: 'green' };
-    if (x >= 9 && x <= 14 && y >= 9 && y <= 14) return { isHome: true, color: 'yellow' };
-    if (x >= 0 && x <= 5 && y >= 9 && y <= 14) return { isHome: true, color: 'red' };
-    return { isHome: false };
+  const getPieceClasses = (color: PlayerColor) => {
+    switch (color) {
+      case 'red':
+        return 'bg-gradient-to-b from-red-500 to-red-600 border-red-600';
+      case 'blue':
+        return 'bg-gradient-to-b from-blue-500 to-blue-600 border-blue-600';
+      case 'green':
+        return 'bg-gradient-to-b from-green-500 to-green-600 border-green-600';
+      case 'yellow':
+        return 'bg-gradient-to-b from-yellow-400 to-yellow-500 border-yellow-500';
+    }
   };
 
-  // Start squares: Each color's start (just outside home area)
-  const startPositions = [
-    { x: 1, y: 6 },  // Blue start
-    { x: 8, y: 1 },  // Green start
-    { x: 13, y: 8 }, // Yellow start
-    { x: 6, y: 13 }  // Red start
-  ];
-
-  const isStartSquare = (x: number, y: number): boolean =>
-    startPositions.some(pos => pos.x === x && pos.y === y);
-
-  // Safe squares: 4 safe tiles + 4 start positions (total 8 safe squares)
-  const safePositions = [
-    { x: 1, y: 6 },  // Blue safe/start
-    { x: 8, y: 1 },  // Green safe/start
-    { x: 13, y: 8 }, // Yellow safe/start
-    { x: 6, y: 13 }, // Red safe/start
-    { x: 3, y: 7 },  // Additional safe tile 1
-    { x: 11, y: 7 }, // Additional safe tile 2
-    { x: 7, y: 3 },  // Additional safe tile 3
-    { x: 7, y: 11 }  // Additional safe tile 4
-  ];
-
-  const isSafeSquare = (x: number, y: number): boolean =>
-    safePositions.some(pos => pos.x === x && pos.y === y);
-
-  // Home columns: The "finish" line for each color going from arm to center (classic ludo)
-  const isHomeColumn = (x: number, y: number): string | null => {
-    // Red home column (vertical up to center)
-    if (x === 7 && y >= 9 && y <= 13) return 'red';
-    // Blue home column (vertical down to center)
-    if (x === 7 && y >= 1 && y <= 5) return 'blue';
-    // Green home column (horizontal right to center)
-    if (y === 7 && x >= 9 && x <= 13) return 'green';
-    // Yellow home column (horizontal left to center)
-    if (y === 7 && x >= 1 && x <= 5) return 'yellow';
-    return null;
-  };
-
+  // Render only squares that are in the main path mapping or home column mapping; hide inner 3x3 center entirely
   const renderBoardSquare = (x: number, y: number) => {
-    const isCenter = x === 7 && y === 7;
-    const homeArea = isHomeArea(x, y);
-    const isMainPath = isMainPathSquare(x, y);
-    const isSafe = isSafeSquare(x, y);
-    const isStart = isStartSquare(x, y);
-    const homeCol = isHomeColumn(x, y);
+    if (isCenterArea(x, y)) return null;
 
-    let squareClasses =
-      'board-square relative w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 border border-[hsl(var(--border))] transition-all duration-200 flex items-center justify-center';
+    const key = `${x},${y}`;
+    const inPath = pathKeySet.has(key);
+    const homeColumnColor = homeColumnKeyToColor.get(key) || null;
 
-    if (isCenter) {
-      squareClasses += ' bg-gradient-to-br from-[hsl(var(--accent))] to-[hsl(var(--accent-foreground))] border-[hsl(var(--accent))] shadow-inset';
-    } else if (homeCol) {
-      switch (homeCol) {
-        case 'red':
-          squareClasses += ' bg-gradient-to-br from-red-600 to-red-700 border-red-800 shadow-inset'; break;
-        case 'blue':
-          squareClasses += ' bg-gradient-to-br from-blue-600 to-blue-700 border-blue-800 shadow-inset'; break;
-        case 'green':
-          squareClasses += ' bg-gradient-to-br from-green-600 to-green-700 border-green-800 shadow-inset'; break;
-        case 'yellow':
-          squareClasses += ' bg-gradient-to-br from-yellow-600 to-yellow-700 border-yellow-800 shadow-inset'; break;
-      }
-    } else if (isSafe && isMainPath) {
-      squareClasses += ' bg-gradient-to-br from-emerald-600 to-emerald-700 border-emerald-800 shadow-inset';
-    } else if (isStart && isMainPath) {
-      squareClasses += ' bg-gradient-to-br from-cyan-600 to-cyan-700 border-cyan-800 border-2 shadow-inset';
-    } else if (isMainPath) {
-      squareClasses += ' bg-gradient-to-br from-[hsl(var(--board-cell-light))] to-[hsl(var(--board-cell-dark))] hover:bg-[hsl(var(--board-cell-dark))] shadow-sm';
-    } else if (homeArea.isHome) {
-      switch (homeArea.color) {
-        case 'red':
-          squareClasses += ' bg-gradient-to-br from-red-800/80 to-red-900/80 border-red-700 shadow-sm'; break;
-        case 'blue':
-          squareClasses += ' bg-gradient-to-br from-blue-800/80 to-blue-900/80 border-blue-700 shadow-sm'; break;
-        case 'green':
-          squareClasses += ' bg-gradient-to-br from-green-800/80 to-green-900/80 border-green-700 shadow-sm'; break;
-        case 'yellow':
-          squareClasses += ' bg-gradient-to-br from-yellow-800/80 to-yellow-900/80 border-yellow-700 shadow-sm'; break;
-      }
-    } else {
-      squareClasses += ' bg-gradient-to-br from-[hsl(var(--board-bg))] to-[hsl(var(--board-border))] shadow-sm';
+    if (!inPath && !homeColumnColor) {
+      return null;
     }
 
-    // Find pieces at this position
+    let squareClasses = 'board-square relative z-10 w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 border transition-all duration-200 flex items-center justify-center rounded-md';
+
+    if (homeColumnColor) {
+      switch (homeColumnColor) {
+        case 'red':
+          squareClasses += ' bg-red-200 border-red-300 shadow-sm'; break;
+        case 'blue':
+          squareClasses += ' bg-blue-200 border-blue-300 shadow-sm'; break;
+        case 'green':
+          squareClasses += ' bg-green-200 border-green-300 shadow-sm'; break;
+        case 'yellow':
+          squareClasses += ' bg-yellow-200 border-yellow-300 shadow-sm'; break;
+      }
+    } else {
+      squareClasses += ' bg-white hover:bg-sky-100 border-blue-100 shadow-sm';
+    }
+
+    // Find pieces at this position (path tiles only)
     const piecesAtPosition = gameState.players.flatMap(player =>
       player.pieces.filter(
         piece => Math.round(piece.position.x) === x && Math.round(piece.position.y) === y
@@ -137,10 +91,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       <div
         key={`${x}-${y}`}
         className={cn(squareClasses)}
-        style={{
-          gridColumn: x + 1,
-          gridRow: y + 1,
-        }}
+        style={{ gridColumn: x + 1, gridRow: y + 1 }}
       >
         {piecesAtPosition.map((piece, index) => (
           <GamePiece
@@ -152,27 +103,122 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             totalStack={piecesAtPosition.length}
           />
         ))}
+      </div>
+    );
+  };
 
-        {/* Safe square marker */}
-        {isSafe && isMainPath && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="text-lg text-white drop-shadow-sm font-bold">★</div>
-          </div>
-        )}
+  // Arrange four home pieces in a fixed 2x2 grid per color (square formation)
+  const getHomeGridPositions = () => [
+    { left: 30, top: 30 },
+    { left: 70, top: 30 },
+    { left: 30, top: 70 },
+    { left: 70, top: 70 }
+  ];
 
-        {/* Center finish marker */}
-        {isCenter && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="text-xl font-bold text-white drop-shadow-lg">🏆</div>
-          </div>
-        )}
+  const getHomeEmoji = (color: PlayerColor) => {
+    switch (color) {
+      case 'red': return '🔴';
+      case 'blue': return '🔵';
+      case 'green': return '🟢';
+      case 'yellow': return '🟡';
+    }
+  };
 
-        {/* Start square marker */}
-        {isStart && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="w-3 h-3 bg-white rounded-full shadow-md border border-gray-400"></div>
+  // Dice badge helpers (current or last dice value per player)
+  const getPlayerDiceValue = (playerId: string): number | null => {
+    const current = gameState.players[gameState.currentPlayerIndex];
+    if (current.id === playerId && gameState.diceValue !== null) return gameState.diceValue;
+    for (let i = gameState.moveHistory.length - 1; i >= 0; i--) {
+      const mv = gameState.moveHistory[i];
+      if (mv.playerId === playerId) return mv.diceValue;
+    }
+    return null;
+  };
+
+  const renderDiceBadge = (value: number | null) => (
+    <div className={cn(
+      'absolute bottom-2 right-2 w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 rounded-md border-2 flex items-center justify-center text-xs font-bold',
+      value === null ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-white text-slate-700 border-slate-300'
+    )}>
+      {value ?? '-'}
+    </div>
+  );
+
+  const renderHomeBlock = (color: PlayerColor, gridColStart: number, gridRowStart: number) => {
+    const player = gameState.players.find(p => p.color === color);
+    const piecesInHome = player ? player.pieces.filter(p => p.isInHome) : [];
+
+    return (
+      <div 
+        key={`${color}-home`}
+        className="relative rounded-lg"
+        style={{ gridColumn: `${gridColStart} / span 6`, gridRow: `${gridRowStart} / span 6` }}
+      >
+        <div className={cn('absolute inset-0 rounded-lg border-2', getHomeBgClasses(color))} />
+        {/* Center emblem */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className={cn(
+            'w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-xl border-2 flex items-center justify-center text-2xl md:text-3xl',
+            color === 'red' ? 'border-red-400 text-red-500 bg-red-50' : '',
+            color === 'blue' ? 'border-blue-400 text-blue-500 bg-blue-50' : '',
+            color === 'green' ? 'border-green-400 text-green-500 bg-green-50' : '',
+            color === 'yellow' ? 'border-yellow-400 text-yellow-500 bg-yellow-50' : ''
+          )}>
+            {getHomeEmoji(color)}
           </div>
-        )}
+        </div>
+        {/* Pieces layer in fixed 2x2 grid */}
+        <div className="absolute inset-0 rounded-lg">
+          {piecesInHome.map((piece, idx) => {
+            const slot = getHomeGridPositions()[idx % 4];
+            const isValid = validMoves.includes(piece.id);
+            return (
+              <div
+                key={piece.id}
+                className={cn(
+                  'absolute w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 rounded-full border-2 shadow-md transition-transform duration-200',
+                  getPieceClasses(color),
+                  isValid ? 'ring-2 ring-white animate-pulse cursor-pointer' : 'opacity-95'
+                )}
+                style={{
+                  left: `calc(${slot.left}% - 12px)`,
+                  top: `calc(${slot.top}% - 12px)`,
+                  zIndex: 20,
+                }}
+                onClick={isValid ? () => onPieceClick(piece.id) : undefined}
+              />
+            );
+          })}
+        </div>
+        {/* Dice badge */}
+        {player && renderDiceBadge(getPlayerDiceValue(player.id))}
+      </div>
+    );
+  };
+
+  // Single merged center with finished pieces around trophy
+  const renderCenter = () => {
+    const finishedPieces = gameState.players.flatMap(p => p.pieces.filter(pc => pc.isFinished));
+
+    return (
+      <div
+        className="relative rounded-xl border-2 bg-amber-100/90 border-amber-200 flex items-center justify-center"
+        style={{ gridColumn: '7 / 10', gridRow: '7 / 10' }}
+      >
+        <div className="text-2xl md:text-3xl">🏆</div>
+        {finishedPieces.map((pc, idx) => {
+          const angle = (idx / Math.max(1, finishedPieces.length)) * Math.PI * 2;
+          const r = 35; // percent radius of the 3x3 block
+          const left = 50 + r * Math.cos(angle);
+          const top = 50 + r * Math.sin(angle);
+          return (
+            <div
+              key={pc.id}
+              className={cn('absolute w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 rounded-full border-2 shadow-md', getPieceClasses(pc.color))}
+              style={{ left: `calc(${left}% - 12px)`, top: `calc(${top}% - 12px)` }}
+            />
+          );
+        })}
       </div>
     );
   };
@@ -180,29 +226,39 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   return (
     <div className="game-board relative mx-auto p-4">
       <div 
-        className="grid gap-0.5 bg-[hsl(var(--board-bg))] p-2 rounded-lg"
+        className="grid gap-0.5 p-4 rounded-lg shadow-md border-2 border-blue-200 bg-white"
         style={{ 
           gridTemplateColumns: `repeat(${BOARD_SIZE}, 1fr)`,
           gridTemplateRows: `repeat(${BOARD_SIZE}, 1fr)`,
         }}
       >
+        {/* Merged Home Areas */}
+        {renderHomeBlock('blue', 1, 1)}
+        {renderHomeBlock('green', 10, 1)}
+        {renderHomeBlock('yellow', 10, 10)}
+        {renderHomeBlock('red', 1, 10)}
+
+        {/* Center area merged (3x3) */}
+        {renderCenter()}
+
+        {/* Visible path and home columns only */}
         {Array.from({ length: BOARD_SIZE }, (_, y) =>
           Array.from({ length: BOARD_SIZE }, (_, x) => renderBoardSquare(x, y))
         )}
       </div>
       
-      {/* Corner labels */}
-      <div className="absolute top-2 left-2 bg-gradient-to-r from-blue-700 to-blue-800 text-white font-bold text-xs px-2 py-1 rounded shadow-md border border-blue-600">
-        🔵 BLUE
+      {/* Home area labels */}
+      <div className="absolute top-6 left-6 bg-blue-100 text-blue-700 font-bold text-xs px-2 py-1 rounded-md shadow-sm border border-blue-200">
+        BLUE HOME
       </div>
-      <div className="absolute top-2 right-2 bg-gradient-to-r from-green-700 to-green-800 text-white font-bold text-xs px-2 py-1 rounded shadow-md border border-green-600">
-        🟢 GREEN
+      <div className="absolute top-6 right-6 bg-green-100 text-green-700 font-bold text-xs px-2 py-1 rounded-md shadow-sm border border-green-200">
+        GREEN HOME
       </div>
-      <div className="absolute bottom-2 right-2 bg-gradient-to-r from-yellow-700 to-yellow-800 text-black font-bold text-xs px-2 py-1 rounded shadow-md border border-yellow-600">
-        🟡 YELLOW
+      <div className="absolute bottom-6 right-6 bg-yellow-100 text-yellow-700 font-bold text-xs px-2 py-1 rounded-md shadow-sm border border-yellow-200">
+        YELLOW HOME
       </div>
-      <div className="absolute bottom-2 left-2 bg-gradient-to-r from-red-700 to-red-800 text-white font-bold text-xs px-2 py-1 rounded shadow-md border border-red-600">
-        🔴 RED
+      <div className="absolute bottom-6 left-6 bg-red-100 text-red-700 font-bold text-xs px-2 py-1 rounded-md shadow-sm border border-red-200">
+        RED HOME
       </div>
     </div>
   );
