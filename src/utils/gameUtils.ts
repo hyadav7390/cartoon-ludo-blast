@@ -49,7 +49,7 @@ export const canMovePiece = (piece: GamePiece, diceValue: number): boolean => {
   
   if (piece.isInHomeColumn) {
     const currentHomePos = piece.boardPosition - TOTAL_MAIN_SQUARES;
-    return currentHomePos + diceValue <= HOME_COLUMN_SQUARES;
+    return currentHomePos + diceValue <= HOME_COLUMN_SQUARES - 1;
   }
   
   return true;
@@ -73,15 +73,14 @@ export const movePiece = (piece: GamePiece, diceValue: number, allPlayers: Playe
     // Moving in home column
     const currentHomePos = piece.boardPosition - TOTAL_MAIN_SQUARES;
     const newHomePos = currentHomePos + diceValue;
-    
-    if (newHomePos === HOME_COLUMN_SQUARES) {
-      // Finished!
+    const willFinish = newHomePos >= HOME_COLUMN_SQUARES - 1;
+
+    if (willFinish) {
       newBoardPosition = TOTAL_MAIN_SQUARES + HOME_COLUMN_SQUARES;
       newPosition = { x: 7, y: 7 }; // Center finish
       isFinished = true;
       gameMessage = `${piece.color} piece reached home!`;
     } else {
-      // Still in home column
       newBoardPosition = TOTAL_MAIN_SQUARES + newHomePos;
       newPosition = getHomeColumnPosition(piece.color, newHomePos);
       isInHomeColumn = true;
@@ -98,16 +97,25 @@ export const movePiece = (piece: GamePiece, diceValue: number, allPlayers: Playe
       : TOTAL_MAIN_SQUARES - playerStartPos + piece.boardPosition;
     
     const wouldCompleteCircuit = normalizedPos + diceValue >= TOTAL_MAIN_SQUARES;
-    const wouldEnterHomeColumn = normalizedPos + diceValue >= TOTAL_MAIN_SQUARES - 6 && 
-                                normalizedPos < TOTAL_MAIN_SQUARES - 6;
+    const homeEntryThreshold = TOTAL_MAIN_SQUARES - HOME_COLUMN_SQUARES;
+    const wouldEnterHomeColumn = normalizedPos < homeEntryThreshold && 
+                                normalizedPos + diceValue >= homeEntryThreshold;
     
     if (wouldEnterHomeColumn) {
       // Calculate exact home column position
-      const stepsIntoHomeColumn = normalizedPos + diceValue - (TOTAL_MAIN_SQUARES - 6);
-      newBoardPosition = TOTAL_MAIN_SQUARES + stepsIntoHomeColumn;
-      newPosition = getHomeColumnPosition(piece.color, stepsIntoHomeColumn);
-      isInHomeColumn = true;
-      gameMessage = `${piece.color} piece entered home column!`;
+      const stepsIntoHomeColumn = normalizedPos + diceValue - homeEntryThreshold;
+      const clampedHomePos = Math.min(stepsIntoHomeColumn, HOME_COLUMN_SQUARES - 1);
+      if (clampedHomePos >= HOME_COLUMN_SQUARES - 1) {
+        newBoardPosition = TOTAL_MAIN_SQUARES + HOME_COLUMN_SQUARES;
+        newPosition = { x: 7, y: 7 };
+        isFinished = true;
+        gameMessage = `${piece.color} piece reached home!`;
+      } else {
+        newBoardPosition = TOTAL_MAIN_SQUARES + clampedHomePos;
+        newPosition = getHomeColumnPosition(piece.color, clampedHomePos);
+        isInHomeColumn = true;
+        gameMessage = `${piece.color} piece entered home column!`;
+      }
     } else {
       // Regular move on main path
       newBoardPosition = newMainPathPos;
@@ -180,9 +188,26 @@ export const getHomePositionForPiece = (piece: GamePiece): Position => {
 
 export { getBoardPosition, getHomeColumnPosition };
 
+let sharedAudioContext: AudioContext | null = null;
+
+const getSharedAudioContext = (): AudioContext | null => {
+  if (typeof window === 'undefined') return null;
+  const AudioContextConstructor =
+    window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextConstructor) return null;
+  if (!sharedAudioContext || sharedAudioContext.state === 'closed') {
+    sharedAudioContext = new AudioContextConstructor();
+  }
+  return sharedAudioContext;
+};
+
 export const playSound = (soundType: 'dice' | 'move' | 'capture' | 'win' | 'enter') => {
   try {
-    const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const audioContext = getSharedAudioContext();
+    if (!audioContext) return;
+    if (audioContext.state === 'suspended') {
+      audioContext.resume().catch(() => {});
+    }
     
     const createTone = (frequency: number, duration: number, volume: number = 0.1) => {
       const oscillator = audioContext.createOscillator();

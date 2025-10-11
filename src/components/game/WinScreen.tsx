@@ -6,12 +6,14 @@ import { cn } from '@/lib/utils';
 interface WinScreenProps {
   winner: Player;
   onPlayAgain: () => void;
+  soundEnabled?: boolean;
 }
 
-export const WinScreen: React.FC<WinScreenProps> = ({ winner, onPlayAgain }) => {
+export const WinScreen: React.FC<WinScreenProps> = ({ winner, onPlayAgain, soundEnabled = true }) => {
   useEffect(() => {
+    if (!soundEnabled) return;
     playSound('win');
-  }, []);
+  }, [soundEnabled]);
 
   const getPlayerColorClass = (color: string) => {
     switch (color) {

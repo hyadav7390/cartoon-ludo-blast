@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useGameLogic } from '@/hooks/useGameLogic';
 import { GameBoard } from './GameBoard';
 import { Dice } from './Dice';
@@ -29,7 +29,6 @@ export const Game: React.FC<GameProps> = ({ playerCount: initialPlayerCount = 4 
     startGame
   } = useGameLogic(playerCount);
 
-  const currentPlayer = gameState.players[gameState.currentPlayerIndex];
   const validMoves = gameState.diceValue ? getValidMoves(gameState.diceValue) : [];
 
   const handleDiceRoll = () => {
@@ -137,6 +136,7 @@ export const Game: React.FC<GameProps> = ({ playerCount: initialPlayerCount = 4 
       <WinScreen
         winner={gameState.winner}
         onPlayAgain={handlePlayAgain}
+        soundEnabled={soundEnabled}
       />
     );
   }

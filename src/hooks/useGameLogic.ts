@@ -1,8 +1,8 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { GameState, Player, GamePiece, PlayerColor, GameMove, PLAYER_COLORS, HOME_POSITIONS, PIECES_PER_PLAYER, TOTAL_MAIN_SQUARES, HOME_COLUMN_SQUARES } from '@/types/game';
+import { GameState, Player, GamePiece, PIECES_PER_PLAYER, TOTAL_MAIN_SQUARES, HOME_COLUMN_SQUARES } from '@/types/game';
 import { START_POSITIONS, SAFE_SQUARES } from '@/utils/boardPositions';
-import { canMovePiece, movePiece, createInitialGameState, getHomePositionForPiece, getBoardPosition, getHomeColumnPosition } from '@/utils/gameUtils';
+import { canMovePiece, createInitialGameState, getHomePositionForPiece, getBoardPosition, getHomeColumnPosition } from '@/utils/gameUtils';
 
 export const useGameLogic = (playerCount: number = 4) => {
   const [gameState, setGameState] = useState<GameState>(() => 
@@ -10,8 +10,14 @@ export const useGameLogic = (playerCount: number = 4) => {
   );
 
   const [turnTimer, setTurnTimer] = useState<number>(30);
-  const [timerInterval, setTimerInterval] = useState<NodeJS.Timeout | null>(null);
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isAnimatingRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    setGameState(createInitialGameState(playerCount));
+    setTurnTimer(30);
+    isAnimatingRef.current = false;
+  }, [playerCount]);
 
   const skipTurn = useCallback(() => {
     setGameState((prev) => {
@@ -60,15 +66,27 @@ export const useGameLogic = (playerCount: number = 4) => {
           return prev - 1;
         });
       }, 1000);
-      setTimerInterval(interval);
-      return () => clearInterval(interval);
+      timerIntervalRef.current = interval;
+      return () => {
+        clearInterval(interval);
+        timerIntervalRef.current = null;
+      };
     } else {
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        setTimerInterval(null);
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
       }
     }
   }, [gameState.gameStatus, gameState.isRolling, gameState.diceValue, gameState.currentPlayerIndex, skipTurn]);
+
+  useEffect(() => {
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   // Auto-advance when no valid moves or only 1 valid move
   useEffect(() => {
@@ -115,13 +133,18 @@ export const useGameLogic = (playerCount: number = 4) => {
       const diceValue = Math.floor(Math.random() * 6) + 1;
       
       setGameState(prev => {
-        const currentPlayer = prev.players[prev.currentPlayerIndex];
+        const currentPlayerIndex = prev.currentPlayerIndex;
+        const currentPlayer = prev.players[currentPlayerIndex];
         const newConsecutiveSixes = diceValue === 6 ? prev.consecutiveSixes + 1 : 0;
-        
+        const playersWithResetSkips = prev.players.map((player, index) =>
+          index === currentPlayerIndex ? { ...player, skippedTurns: 0 } : player
+        );
+
         if (newConsecutiveSixes === 3) {
           const nextPlayerIndex = (prev.currentPlayerIndex + 1) % prev.players.length;
           return {
             ...prev,
+            players: playersWithResetSkips,
             isRolling: false,
             diceValue: null,
             currentPlayerIndex: nextPlayerIndex,
@@ -132,6 +155,7 @@ export const useGameLogic = (playerCount: number = 4) => {
 
         return {
           ...prev,
+          players: playersWithResetSkips,
           isRolling: false,
           diceValue,
           consecutiveSixes: newConsecutiveSixes,
@@ -158,70 +182,79 @@ export const useGameLogic = (playerCount: number = 4) => {
 
   const movePieceHandler = useCallback((pieceId: string) => {
     if (!gameState.diceValue || isAnimatingRef.current) return;
-    
-    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+
+    const currentPlayerIndex = gameState.currentPlayerIndex;
+    const currentPlayer = gameState.players[currentPlayerIndex];
     const piece = currentPlayer.pieces.find(p => p.id === pieceId);
-    
+
     if (!piece || !canMovePiece(piece, gameState.diceValue)) return;
 
     const diceValue = gameState.diceValue;
     const playerStartPos = START_POSITIONS[piece.color];
+    const finishColumnIndex = HOME_COLUMN_SQUARES - 1;
+    const finishBoardPosition = TOTAL_MAIN_SQUARES + HOME_COLUMN_SQUARES;
 
-    // Build step-by-step path
     type Step = { boardPosition: number; x: number; y: number; isInHomeColumn: boolean; isFinished: boolean };
     const steps: Step[] = [];
 
     if (piece.isInHome && diceValue === 6) {
-      const bp = playerStartPos;
-      const pos = getBoardPosition(bp);
-      steps.push({ boardPosition: bp, x: pos.x, y: pos.y, isInHomeColumn: false, isFinished: false });
-    } else if (piece.isInHomeColumn) {
-      let currentHomePos = piece.boardPosition - TOTAL_MAIN_SQUARES; // 0..5 typically
-      for (let s = 1; s <= diceValue; s++) {
-        const newHomePos = currentHomePos + 1;
-        const isFinish = newHomePos === HOME_COLUMN_SQUARES;
-        const bp = isFinish ? TOTAL_MAIN_SQUARES + HOME_COLUMN_SQUARES : TOTAL_MAIN_SQUARES + newHomePos;
-        const pos = isFinish ? { x: 7, y: 7 } : getHomeColumnPosition(piece.color, newHomePos);
-        steps.push({ boardPosition: bp, x: pos.x, y: pos.y, isInHomeColumn: !isFinish, isFinished: isFinish });
-        currentHomePos = newHomePos;
-      }
+      const boardPos = playerStartPos;
+      const pos = getBoardPosition(boardPos);
+      steps.push({ boardPosition: boardPos, x: pos.x, y: pos.y, isInHomeColumn: false, isFinished: false });
     } else {
-      // Moving on main path, possibly entering home column
-      let currentBoardPos = piece.boardPosition; // 0..51
-      let inHomeColumn = false;
-      let currentHomePos = -1;
+      let inHomeColumn = piece.isInHomeColumn;
+      let currentBoardPos = piece.boardPosition;
+      let currentHomePos = piece.isInHomeColumn ? piece.boardPosition - TOTAL_MAIN_SQUARES : -1;
+      const homeEntryThreshold = TOTAL_MAIN_SQUARES - HOME_COLUMN_SQUARES;
 
-      for (let s = 1; s <= diceValue; s++) {
+      for (let step = 1; step <= diceValue; step++) {
         if (!inHomeColumn) {
           const normalized = (currentBoardPos >= playerStartPos)
             ? currentBoardPos - playerStartPos
             : TOTAL_MAIN_SQUARES - playerStartPos + currentBoardPos;
-
-          const willEnterHome = normalized + 1 >= TOTAL_MAIN_SQUARES - 6 && normalized < TOTAL_MAIN_SQUARES - 6;
+          const willEnterHome = normalized < homeEntryThreshold && normalized + 1 >= homeEntryThreshold;
 
           if (willEnterHome) {
-            const stepsIntoHomeColumn = normalized + 1 - (TOTAL_MAIN_SQUARES - 6);
-            const bp = TOTAL_MAIN_SQUARES + stepsIntoHomeColumn; // 52..57
-            const pos = getHomeColumnPosition(piece.color, stepsIntoHomeColumn);
-            steps.push({ boardPosition: bp, x: pos.x, y: pos.y, isInHomeColumn: true, isFinished: false });
+            const stepsIntoHomeColumn = normalized + 1 - homeEntryThreshold;
+            const nextHomePos = Math.min(stepsIntoHomeColumn, finishColumnIndex);
+
+            if (nextHomePos >= finishColumnIndex) {
+              steps.push({ boardPosition: finishBoardPosition, x: 7, y: 7, isInHomeColumn: false, isFinished: true });
+              inHomeColumn = false;
+              currentHomePos = finishColumnIndex;
+              break;
+            }
+
+            const boardPos = TOTAL_MAIN_SQUARES + nextHomePos;
+            const pos = getHomeColumnPosition(piece.color, nextHomePos);
+            steps.push({ boardPosition: boardPos, x: pos.x, y: pos.y, isInHomeColumn: true, isFinished: false });
             inHomeColumn = true;
-            currentHomePos = stepsIntoHomeColumn;
+            currentHomePos = nextHomePos;
           } else {
-            const bp = (currentBoardPos + 1) % TOTAL_MAIN_SQUARES;
-            const pos = getBoardPosition(bp);
-            steps.push({ boardPosition: bp, x: pos.x, y: pos.y, isInHomeColumn: false, isFinished: false });
-            currentBoardPos = bp;
+            const boardPos = (currentBoardPos + 1) % TOTAL_MAIN_SQUARES;
+            const pos = getBoardPosition(boardPos);
+            steps.push({ boardPosition: boardPos, x: pos.x, y: pos.y, isInHomeColumn: false, isFinished: false });
+            currentBoardPos = boardPos;
           }
         } else {
-          // Already in home column
-          const newHomePos = currentHomePos + 1;
-          const isFinish = newHomePos === HOME_COLUMN_SQUARES;
-          const bp = isFinish ? TOTAL_MAIN_SQUARES + HOME_COLUMN_SQUARES : TOTAL_MAIN_SQUARES + newHomePos;
-          const pos = isFinish ? { x: 7, y: 7 } : getHomeColumnPosition(piece.color, newHomePos);
-          steps.push({ boardPosition: bp, x: pos.x, y: pos.y, isInHomeColumn: !isFinish, isFinished: isFinish });
-          currentHomePos = newHomePos;
+          const nextHomePos = currentHomePos + 1;
+          if (nextHomePos >= finishColumnIndex) {
+            steps.push({ boardPosition: finishBoardPosition, x: 7, y: 7, isInHomeColumn: false, isFinished: true });
+            inHomeColumn = false;
+            currentHomePos = finishColumnIndex;
+            break;
+          }
+
+          const boardPos = TOTAL_MAIN_SQUARES + nextHomePos;
+          const pos = getHomeColumnPosition(piece.color, nextHomePos);
+          steps.push({ boardPosition: boardPos, x: pos.x, y: pos.y, isInHomeColumn: true, isFinished: false });
+          currentHomePos = nextHomePos;
         }
       }
+    }
+
+    if (steps.length === 0) {
+      return;
     }
 
     // Run animation
@@ -295,20 +328,28 @@ export const useGameLogic = (playerCount: number = 4) => {
 
           // Final state update: next player / win
           setGameState(prev => {
-            const updatedPlayers = prev.players.map(player => player.id === currentPlayer.id ? {
-              ...player,
-              pieces: player.pieces.map(p => p.id === pieceId ? {
-                ...p,
-                position: { x: finalStep.x, y: finalStep.y },
-                boardPosition: finalStep.boardPosition,
-                isInHome: false,
-                isInHomeColumn: finalStep.isInHomeColumn,
-                isFinished: finalStep.isFinished
-              } as GamePiece : p)
-            } as Player : player);
+            const resolvedCurrentIndex = prev.players.findIndex(p => p.id === currentPlayer.id);
+            const activeIndex = resolvedCurrentIndex === -1 ? prev.currentPlayerIndex : resolvedCurrentIndex;
+            const updatedPlayers = prev.players.map(player => {
+              if (player.id !== currentPlayer.id) {
+                return player;
+              }
+              return {
+                ...player,
+                skippedTurns: 0,
+                pieces: player.pieces.map(p => p.id === pieceId ? {
+                  ...p,
+                  position: { x: finalStep.x, y: finalStep.y },
+                  boardPosition: finalStep.boardPosition,
+                  isInHome: false,
+                  isInHomeColumn: finalStep.isInHomeColumn,
+                  isFinished: finalStep.isFinished
+                } as GamePiece : p)
+              } as Player;
+            });
 
-            const updatedCurrentPlayer = updatedPlayers[gameState.currentPlayerIndex];
-            const finishedPieces = updatedCurrentPlayer.pieces.filter(p => p.isFinished);
+            const activePlayer = updatedPlayers[activeIndex];
+            const finishedPieces = activePlayer.pieces.filter(p => p.isFinished);
 
             if (finishedPieces.length === PIECES_PER_PLAYER) {
               isAnimatingRef.current = false;
@@ -316,16 +357,19 @@ export const useGameLogic = (playerCount: number = 4) => {
                 ...prev,
                 players: updatedPlayers,
                 gameStatus: 'finished',
-                winner: updatedCurrentPlayer,
+                winner: activePlayer,
                 diceValue: null,
-                gameMessage: `${updatedCurrentPlayer.name} wins the game!`
+                gameMessage: `${activePlayer.name} wins the game!`
               } as GameState;
             }
 
-            let nextPlayerIndex = gameState.currentPlayerIndex;
-            if (diceValue !== 6 || gameState.consecutiveSixes >= 2) {
-              nextPlayerIndex = (gameState.currentPlayerIndex + 1) % prev.players.length;
-            }
+            const shouldPassTurn = diceValue !== 6 || prev.consecutiveSixes >= 2;
+            const nextPlayerIndex = shouldPassTurn
+              ? (activeIndex + 1) % prev.players.length
+              : activeIndex;
+            const consecutiveSixes = diceValue === 6 && !shouldPassTurn
+              ? prev.consecutiveSixes
+              : 0;
 
             isAnimatingRef.current = false;
             return {
@@ -333,8 +377,8 @@ export const useGameLogic = (playerCount: number = 4) => {
               players: updatedPlayers,
               currentPlayerIndex: nextPlayerIndex,
               diceValue: null,
-              consecutiveSixes: diceValue === 6 ? gameState.consecutiveSixes : 0,
-              gameMessage: gameMessage + (nextPlayerIndex !== gameState.currentPlayerIndex ? ` ${updatedPlayers[nextPlayerIndex].name}'s turn.` : ' Roll again!')
+              consecutiveSixes,
+              gameMessage: gameMessage + (nextPlayerIndex !== activeIndex ? ` ${updatedPlayers[nextPlayerIndex].name}'s turn.` : ' Roll again!')
             } as GameState;
           });
           setTurnTimer(30);
@@ -355,9 +399,9 @@ export const useGameLogic = (playerCount: number = 4) => {
   }, []);
 
   const resetGame = useCallback(() => {
-    setGameState(createInitialGameState(gameState.players.length));
+    setGameState(createInitialGameState(playerCount));
     setTurnTimer(30);
-  }, [gameState.players.length]);
+  }, [playerCount]);
 
   return {
     gameState,
