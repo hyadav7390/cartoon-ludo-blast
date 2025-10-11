@@ -8,6 +8,7 @@ import { GameMessage } from './GameMessage';
 import { WinScreen } from './WinScreen';
 import { playSound } from '@/utils/gameUtils';
 import { cn } from '@/lib/utils';
+import WalletConnectButton from '@/components/wallet/WalletConnectButton';
 
 interface GameProps {
   playerCount?: number;
@@ -155,6 +156,7 @@ export const Game: React.FC<GameProps> = ({ playerCount: initialPlayerCount = 4 
           </div>
           
           <div className="flex items-center gap-4">
+            <WalletConnectButton />
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={cn(
