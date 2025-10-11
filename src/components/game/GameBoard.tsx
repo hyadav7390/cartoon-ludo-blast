@@ -2,7 +2,7 @@ import React from 'react';
 import { GameState, BOARD_SIZE, PlayerColor } from '@/types/game';
 import { GamePiece } from './GamePiece';
 import { cn } from '@/lib/utils';
-import { MAIN_PATH_POSITIONS, HOME_COLUMN_POSITIONS } from '@/utils/boardPositions';
+import { MAIN_PATH_POSITIONS, HOME_COLUMN_POSITIONS, START_POSITIONS, SAFE_SQUARES } from '@/utils/boardPositions';
 
 interface GameBoardProps {
   gameState: GameState;
@@ -17,6 +17,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 }) => {
   // Precompute visible path and home column squares from board mapping
   const pathKeySet = React.useMemo(() => new Set(MAIN_PATH_POSITIONS.map(p => `${p.x},${p.y}`)), []);
+  const posKeyToIndex = React.useMemo(() => {
+    const map = new Map<string, number>();
+    MAIN_PATH_POSITIONS.forEach((p, i) => map.set(`${p.x},${p.y}`, i));
+    return map;
+  }, []);
   const homeColumnKeyToColor = React.useMemo(() => {
     const map = new Map<string, PlayerColor>();
     (['blue','green','yellow','red'] as PlayerColor[]).forEach((color) => {
@@ -26,6 +31,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     });
     return map;
   }, []);
+  const startIndexToColor = React.useMemo(() => {
+    const map = new Map<number, PlayerColor>();
+    (Object.keys(START_POSITIONS) as PlayerColor[]).forEach((color) => {
+      map.set(START_POSITIONS[color], color);
+    });
+    return map;
+  }, []);
+  const safeIndexSet = React.useMemo(() => new Set<number>(SAFE_SQUARES), []);
 
   const isCenterArea = (x: number, y: number): boolean => x >= 6 && x <= 8 && y >= 6 && y <= 8;
 
@@ -63,6 +76,10 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       return null;
     }
 
+    const idx = posKeyToIndex.get(key);
+    const isSafe = typeof idx === 'number' && safeIndexSet.has(idx);
+    const startColor = typeof idx === 'number' ? startIndexToColor.get(idx) || null : null;
+
     let squareClasses = 'board-square relative z-10 w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 border transition-all duration-200 flex items-center justify-center rounded-md';
 
     if (homeColumnColor) {
@@ -77,7 +94,18 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           squareClasses += ' bg-yellow-200 border-yellow-300 shadow-sm'; break;
       }
     } else {
+      // Main path base
       squareClasses += ' bg-white hover:bg-sky-100 border-blue-100 shadow-sm';
+      if (startColor) {
+        // Strong border for start squares
+        if (startColor === 'blue') squareClasses += ' bg-white border-4 border-blue-300';
+        if (startColor === 'green') squareClasses += ' bg-white border-4 border-green-300';
+        if (startColor === 'yellow') squareClasses += ' bg-white border-4 border-yellow-300';
+        if (startColor === 'red') squareClasses += ' bg-white border-4 border-red-300';
+      } else if (isSafe) {
+        // Distinct tint for safe squares
+        squareClasses += ' bg-emerald-200 border-emerald-300';
+      }
     }
 
     // Find pieces at this position (path tiles only)
@@ -103,6 +131,24 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             totalStack={piecesAtPosition.length}
           />
         ))}
+
+        {/* Overlays */}
+        {isSafe && !startColor && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="text-base sm:text-lg text-emerald-700 drop-shadow-sm font-bold">★</div>
+          </div>
+        )}
+        {startColor && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className={cn(
+              "w-2 h-2 rounded-full shadow-sm",
+              startColor === 'red' && "bg-red-500",
+              startColor === 'blue' && "bg-blue-500", 
+              startColor === 'green' && "bg-green-500",
+              startColor === 'yellow' && "bg-yellow-500"
+            )}></div>
+          </div>
+        )}
       </div>
     );
   };
@@ -155,18 +201,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         style={{ gridColumn: `${gridColStart} / span 6`, gridRow: `${gridRowStart} / span 6` }}
       >
         <div className={cn('absolute inset-0 rounded-lg border-2', getHomeBgClasses(color))} />
-        {/* Center emblem */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className={cn(
-            'w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-xl border-2 flex items-center justify-center text-2xl md:text-3xl',
-            color === 'red' ? 'border-red-400 text-red-500 bg-red-50' : '',
-            color === 'blue' ? 'border-blue-400 text-blue-500 bg-blue-50' : '',
-            color === 'green' ? 'border-green-400 text-green-500 bg-green-50' : '',
-            color === 'yellow' ? 'border-yellow-400 text-yellow-500 bg-yellow-50' : ''
-          )}>
-            {getHomeEmoji(color)}
-          </div>
-        </div>
         {/* Pieces layer in fixed 2x2 grid */}
         <div className="absolute inset-0 rounded-lg">
           {piecesInHome.map((piece, idx) => {
