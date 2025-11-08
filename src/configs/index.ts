@@ -5,8 +5,11 @@ import { injected, metaMask, walletConnect } from 'wagmi/connectors';
 export const TARGET_CHAIN = sepolia;
 export const TARGET_CHAIN_ID = sepolia.id;
 
-const WALLETCONNECT_PROJECT_ID =
-  import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '9871f4b1d2f9403da6e8f2f4fba5f6b7';
+const WALLETCONNECT_PROJECT_ID = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
+
+if (!WALLETCONNECT_PROJECT_ID) {
+  throw new Error('VITE_WALLETCONNECT_PROJECT_ID is not defined. Please set it before running the dapp.');
+}
 const SEPOLIA_RPC_URL = import.meta.env.VITE_SEPOLIA_RPC_URL;
 
 const baseConnectors = [

@@ -4,14 +4,14 @@ import { cn } from '@/lib/utils';
 
 interface PlayerIndicatorProps {
   player: Player;
-  isActive: boolean;
+  isCurrentTurn: boolean;
   timer?: number;
   turnDuration?: number;
 }
 
 export const PlayerIndicator: React.FC<PlayerIndicatorProps> = ({
   player,
-  isActive,
+  isCurrentTurn,
   timer,
   turnDuration = 30,
 }) => {
@@ -52,7 +52,7 @@ export const PlayerIndicator: React.FC<PlayerIndicatorProps> = ({
     <div className={cn(
       'player-indicator border-2 transition-all duration-300 rounded-lg p-3 shadow-md',
       getPlayerColorClass(player.color),
-      isActive && 'active scale-105 ring-2 ring-[hsl(var(--primary))] ring-opacity-50'
+      isCurrentTurn && 'active scale-105 ring-2 ring-[hsl(var(--primary))] ring-opacity-50'
     )}>
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
@@ -70,7 +70,7 @@ export const PlayerIndicator: React.FC<PlayerIndicatorProps> = ({
           </div>
         </div>
         
-        {isActive && timer !== undefined && (
+        {isCurrentTurn && timer !== undefined && (
           <div className="flex flex-col items-center">
             <div className={cn(
               'text-sm font-bold transition-all duration-300',
@@ -113,7 +113,7 @@ export const PlayerIndicator: React.FC<PlayerIndicatorProps> = ({
       )}
 
       {/* Active turn indicator */}
-      {isActive && (
+      {isCurrentTurn && (
         <div className="mt-2 text-xs font-bold text-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 rounded px-2 py-1 border border-[hsl(var(--primary))]/20 text-center">
           YOUR TURN
         </div>

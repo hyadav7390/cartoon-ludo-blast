@@ -225,7 +225,7 @@ export const Game: React.FC = () => {
     if (!routeGameId) return;
     try {
       const parsed = BigInt(routeGameId);
-      if (!selectedGameId || selectedGameId !== parsed) {
+      if (selectedGameId === null || selectedGameId !== parsed) {
         selectGame(parsed);
       }
     } catch {
@@ -234,7 +234,7 @@ export const Game: React.FC = () => {
   }, [navigate, routeGameId, selectGame, selectedGameId]);
 
   useEffect(() => {
-    if (selectedGameId) {
+    if (selectedGameId !== null) {
       const expected = selectedGameId.toString();
       if (routeGameId !== expected) {
         navigate(`/game/${expected}`, { replace: true });
@@ -333,7 +333,8 @@ export const Game: React.FC = () => {
       }
     };
 
-    return gameState.activity.slice(0, 12).map((entry) => ({
+    const meaningfulActivity = gameState.activity.filter((entry) => entry.timestamp > 0);
+    return meaningfulActivity.slice(0, 12).map((entry) => ({
       id: entry.id,
       message: formatEntry(entry),
       time: new Date(entry.timestamp).toLocaleTimeString(),
@@ -384,7 +385,7 @@ export const Game: React.FC = () => {
         </LobbyCard>
       </div>
     );
-  } else if (!selectedGameId) {
+  } else if (selectedGameId === null) {
     body = (
       <div className="flex flex-1 items-center justify-center">
         <GameLobby
@@ -469,15 +470,19 @@ export const Game: React.FC = () => {
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-7xl mx-auto">
           <div className="xl:col-span-2 space-y-4">
             <h2 className="text-lg font-bold text-center text-shadow">Players</h2>
-            {activePlayers.slice(0, 2).map((player) => (
-              <PlayerIndicator
-                key={player.id}
-                player={player}
-                isActive={player.isActive}
-                timer={player.isActive ? turnTimer : undefined}
-                turnDuration={gameState.turnDuration}
-              />
-            ))}
+            {activePlayers.slice(0, 2).map((player) => {
+              const isCurrentTurn =
+                gameState.gameStatus === 'playing' && player.playerIndex === gameState.currentPlayerIndex;
+              return (
+                <PlayerIndicator
+                  key={player.id}
+                  player={player}
+                  isCurrentTurn={isCurrentTurn}
+                  timer={isCurrentTurn ? turnTimer : undefined}
+                  turnDuration={gameState.turnDuration}
+                />
+              );
+            })}
           </div>
 
           <div className="xl:col-span-8 flex flex-col items-center space-y-6">
@@ -490,15 +495,19 @@ export const Game: React.FC = () => {
 
           <div className="xl:col-span-2 space-y-4">
             <h2 className="text-lg font-bold text-center text-shadow">Players</h2>
-            {activePlayers.slice(2, 4).map((player) => (
-              <PlayerIndicator
-                key={player.id}
-                player={player}
-                isActive={player.isActive}
-                timer={player.isActive ? turnTimer : undefined}
-                turnDuration={gameState.turnDuration}
-              />
-            ))}
+            {activePlayers.slice(2, 4).map((player) => {
+              const isCurrentTurn =
+                gameState.gameStatus === 'playing' && player.playerIndex === gameState.currentPlayerIndex;
+              return (
+                <PlayerIndicator
+                  key={player.id}
+                  player={player}
+                  isCurrentTurn={isCurrentTurn}
+                  timer={isCurrentTurn ? turnTimer : undefined}
+                  turnDuration={gameState.turnDuration}
+                />
+              );
+            })}
 
             <div className="mt-6">
               <h3 className="text-lg font-bold text-center text-shadow mb-4">Dice</h3>
@@ -574,12 +583,12 @@ export const Game: React.FC = () => {
   const headerSubtitle = useMemo(() => {
     if (isWrongNetwork) return 'Switch to the Sepolia network to keep playing.';
     if (!account) return 'Connect your wallet to start or join a lobby.';
-    if (!selectedGameId) return 'Create a new lobby or join an existing one.';
+    if (selectedGameId === null) return 'Create a new lobby or join an existing one.';
     if (isGameLoading || !gameState) return `Loading game #${selectedGameId.toString()}…`;
     return gameState.gameMessage;
   }, [account, gameState, isGameLoading, isWrongNetwork, selectedGameId]);
 
-  const showLobbyButton = Boolean(selectedGameId);
+  const showLobbyButton = selectedGameId !== null;
   const showResignButton = Boolean(isPlayerSeated && gameState?.gameStatus === 'playing');
 
   return (
@@ -587,7 +596,7 @@ export const Game: React.FC = () => {
       <div className="max-w-7xl w-full mx-auto mb-6">
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="text-center sm:text-left">
-            {selectedGameId && (
+            {selectedGameId !== null && (
               <p className="text-xs uppercase tracking-wide text-muted-foreground">
                 Game #{selectedGameId.toString()}
               </p>

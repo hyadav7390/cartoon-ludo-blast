@@ -167,13 +167,13 @@ export const getHomePositionForPiece = (piece: GamePiece): Position => {
   
   switch(piece.color) {
     case 'red':
-      centerPosition = { x: 3, y: 11 };
-      break;
-    case 'blue':
       centerPosition = { x: 3, y: 3 };
       break;
-    case 'green':
+    case 'blue':
       centerPosition = { x: 11, y: 3 };
+      break;
+    case 'green':
+      centerPosition = { x: 3, y: 11 };
       break;
     case 'yellow':
       centerPosition = { x: 11, y: 11 };

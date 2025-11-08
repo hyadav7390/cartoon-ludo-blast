@@ -1,6 +1,12 @@
-import { Address } from 'viem';
+import { Address, getAddress } from 'viem';
 
-export const LUDO_CONTRACT_ADDRESS: Address = '0x01C4B7B09d287531AbFa3393576aFEd8B52AB580';
+const resolvedContractAddress = (import.meta.env.VITE_CONTRACT_ADDRESS ?? '').trim();
+
+if (!resolvedContractAddress) {
+  throw new Error('VITE_CONTRACT_ADDRESS is not defined. Please set it in your environment configuration.');
+}
+
+export const LUDO_CONTRACT_ADDRESS: Address = getAddress(resolvedContractAddress);
 
 export enum GameStatusEnum {
   WaitingForPlayers = 0,
@@ -27,6 +33,27 @@ export enum ActivityKindEnum {
 }
 
 export const ludoAbi = [
+  { type: 'error', name: 'InvalidMaxPlayers', inputs: [] },
+  { type: 'error', name: 'InvalidGameId', inputs: [] },
+  { type: 'error', name: 'GameNotJoinable', inputs: [] },
+  { type: 'error', name: 'NotPlayersTurn', inputs: [] },
+  { type: 'error', name: 'NotPlayersTurnMove', inputs: [] },
+  { type: 'error', name: 'DiceNotRolled', inputs: [] },
+  { type: 'error', name: 'InvalidDiceValue', inputs: [] },
+  { type: 'error', name: 'NoLegalMoves', inputs: [] },
+  { type: 'error', name: 'LandingOnOwnStackNotSafe', inputs: [] },
+  { type: 'error', name: 'SpawnRequiresSix', inputs: [] },
+  { type: 'error', name: 'HomeOvershoot', inputs: [] },
+  { type: 'error', name: 'PieceIndexOutOfRange', inputs: [] },
+  { type: 'error', name: 'PieceAlreadyFinished', inputs: [] },
+  { type: 'error', name: 'DeadlineNotReached', inputs: [] },
+  { type: 'error', name: 'GameNotPlaying', inputs: [] },
+  { type: 'error', name: 'AlreadyFinished', inputs: [] },
+  { type: 'error', name: 'PlayerNotInGame', inputs: [] },
+  { type: 'error', name: 'PlayerInactive', inputs: [] },
+  { type: 'error', name: 'NothingToForcePass', inputs: [] },
+  { type: 'error', name: 'CannotResignInFinishedGame', inputs: [] },
+  { type: 'error', name: 'AlreadyInGame', inputs: [] },
   {
     inputs: [
       { internalType: 'uint8', name: 'maxPlayers', type: 'uint8' },

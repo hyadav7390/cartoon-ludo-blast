@@ -1,5 +1,5 @@
 import React from 'react';
-import { GameState, BOARD_SIZE, PlayerColor } from '@/types/game';
+import { GameState, BOARD_SIZE, PlayerColor, GamePiece as GamePieceType, PLAYER_COLORS } from '@/types/game';
 import { GamePiece } from './GamePiece';
 import { cn } from '@/lib/utils';
 import { MAIN_PATH_POSITIONS, HOME_COLUMN_POSITIONS, START_POSITIONS, SAFE_SQUARES } from '@/utils/boardPositions';
@@ -24,7 +24,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   }, []);
   const homeColumnKeyToColor = React.useMemo(() => {
     const map = new Map<string, PlayerColor>();
-    (['blue','green','yellow','red'] as PlayerColor[]).forEach((color) => {
+    PLAYER_COLORS.forEach((color) => {
       HOME_COLUMN_POSITIONS[color].forEach(pos => {
         map.set(`${pos.x},${pos.y}`, color);
       });
@@ -39,6 +39,22 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     return map;
   }, []);
   const safeIndexSet = React.useMemo(() => new Set<number>(SAFE_SQUARES), []);
+  const boardPieceStacks = React.useMemo(() => {
+    const map = new Map<string, GamePieceType[]>();
+    gameState.players.forEach((player) => {
+      player.pieces.forEach((piece) => {
+        if (piece.isInHome) return;
+        const key = `${Math.round(piece.position.x)},${Math.round(piece.position.y)}`;
+        const bucket = map.get(key);
+        if (bucket) {
+          bucket.push(piece);
+        } else {
+          map.set(key, [piece]);
+        }
+      });
+    });
+    return map;
+  }, [gameState.players]);
 
   const isCenterArea = (x: number, y: number): boolean => x >= 6 && x <= 8 && y >= 6 && y <= 8;
 
@@ -108,12 +124,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       }
     }
 
-    // Find pieces at this position (path tiles only)
-    const piecesAtPosition = gameState.players.flatMap(player =>
-      player.pieces.filter(
-        piece => Math.round(piece.position.x) === x && Math.round(piece.position.y) === y
-      )
-    );
+    const piecesAtPosition = boardPieceStacks.get(key) ?? [];
 
     return (
       <div
@@ -267,10 +278,10 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         }}
       >
         {/* Merged Home Areas */}
-        {renderHomeBlock('blue', 1, 1)}
-        {renderHomeBlock('green', 10, 1)}
+        {renderHomeBlock('red', 1, 1)}
+        {renderHomeBlock('blue', 10, 1)}
         {renderHomeBlock('yellow', 10, 10)}
-        {renderHomeBlock('red', 1, 10)}
+        {renderHomeBlock('green', 1, 10)}
 
         {/* Center area merged (3x3) */}
         {renderCenter()}
@@ -282,17 +293,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       </div>
       
       {/* Home area labels */}
-      <div className="absolute top-6 left-6 bg-blue-100 text-blue-700 font-bold text-xs px-2 py-1 rounded-md shadow-sm border border-blue-200">
-        BLUE HOME
+      <div className="absolute top-6 left-6 bg-red-100 text-red-700 font-bold text-xs px-2 py-1 rounded-md shadow-sm border border-red-200">
+        RED HOME
       </div>
-      <div className="absolute top-6 right-6 bg-green-100 text-green-700 font-bold text-xs px-2 py-1 rounded-md shadow-sm border border-green-200">
-        GREEN HOME
+      <div className="absolute top-6 right-6 bg-blue-100 text-blue-700 font-bold text-xs px-2 py-1 rounded-md shadow-sm border border-blue-200">
+        BLUE HOME
       </div>
       <div className="absolute bottom-6 right-6 bg-yellow-100 text-yellow-700 font-bold text-xs px-2 py-1 rounded-md shadow-sm border border-yellow-200">
         YELLOW HOME
       </div>
-      <div className="absolute bottom-6 left-6 bg-red-100 text-red-700 font-bold text-xs px-2 py-1 rounded-md shadow-sm border border-red-200">
-        RED HOME
+      <div className="absolute bottom-6 left-6 bg-green-100 text-green-700 font-bold text-xs px-2 py-1 rounded-md shadow-sm border border-green-200">
+        GREEN HOME
       </div>
     </div>
   );

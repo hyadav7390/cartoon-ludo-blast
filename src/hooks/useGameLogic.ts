@@ -364,7 +364,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
   const scheduleRefresh = useCallback(
     (gameId?: bigint) => {
       const target = gameId ?? selectedGameId;
-      if (!target) return;
+      if (target === null || target === undefined) return;
       if (refreshTimeoutRef.current) return;
       const now = Date.now();
       if (now - lastSnapshotAtRef.current < 750) {
@@ -469,6 +469,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
             timestamp: Number(entry.at ?? 0n) * 1000,
           };
         });
+        const filteredActivity = activity.filter((entry) => entry.timestamp > 0);
 
         const currentPlayerIndex = Number(snapshotRaw.currentPlayerIndex ?? 0);
         const diceValueNumber = Number(snapshotRaw.diceValue ?? 0);
@@ -481,7 +482,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
           : null;
 
         if (!winnerPlayer) {
-          const winEntry = activity.find((entry) => entry.kind === 'playerWon');
+          const winEntry = filteredActivity.find((entry) => entry.kind === 'playerWon');
           if (winEntry) {
             winnerPlayer =
               players.find((player) => player.address.toLowerCase() === winEntry.player.toLowerCase()) ?? null;
@@ -518,7 +519,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
           sixStreak: Number(snapshotRaw.sixStreak ?? 0),
           gameMessage: '',
           roller: rollerAddress,
-          activity,
+          activity: filteredActivity,
         };
 
         state.gameMessage = buildGameMessage(state, effectiveAddress);
@@ -530,9 +531,15 @@ export const useGameLogic = (): UseGameLogicReturn => {
           : false;
 
         if (userSeated && state.gameStatus !== 'finished' && effectiveAddress) {
-          const ref = { id: gameId, owner: effectiveAddress.toLowerCase() };
-          setStoredGameRef(ref);
-          persistLastGameRef(ref);
+          const nextRef = { id: gameId, owner: effectiveAddress.toLowerCase() };
+          const isSameRef =
+            storedGameRef &&
+            storedGameRef.id === nextRef.id &&
+            storedGameRef.owner === nextRef.owner;
+          if (!isSameRef) {
+            setStoredGameRef(nextRef);
+            persistLastGameRef(nextRef);
+          }
         } else if (
           storedGameRef &&
           storedGameRef.id === gameId &&
@@ -634,7 +641,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
   }, [reloadLobbies]);
 
   useEffect(() => {
-    if (!selectedGameId) {
+    if (selectedGameId === null) {
       setGameState(null);
       setValidMoves([]);
       return;
@@ -665,7 +672,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
   }, [gameState]);
 
   useEffect(() => {
-    if (!publicClient || !selectedGameId || !gameState || !effectiveAddress) {
+    if (!publicClient || selectedGameId === null || !gameState || !effectiveAddress) {
       setValidMoves([]);
       legalMovesCacheRef.current = null;
       return;
@@ -745,7 +752,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
   ]);
 
   const refetchGameState = useCallback(async () => {
-    if (selectedGameId) {
+    if (selectedGameId !== null) {
       await refreshGameSnapshot(selectedGameId);
     }
   }, [refreshGameSnapshot, selectedGameId]);
@@ -920,13 +927,13 @@ export const useGameLogic = (): UseGameLogicReturn => {
   );
 
   const rollDice = useCallback(async () => {
-    if (!selectedGameId) return;
+    if (selectedGameId === null) return;
     await sendTransaction('roll', { functionName: 'rollDice', args: [selectedGameId] }, 'Dice rolled.');
   }, [selectedGameId, sendTransaction]);
 
   const movePiece = useCallback(
     async (pieceId: string) => {
-      if (!selectedGameId) return;
+      if (selectedGameId === null) return;
       const pieceIndex = Number(pieceId.split('-')[1] ?? '0');
       await sendTransaction(
         'move',
@@ -938,12 +945,12 @@ export const useGameLogic = (): UseGameLogicReturn => {
   );
 
   const forcePass = useCallback(async () => {
-    if (!selectedGameId) return;
+    if (selectedGameId === null) return;
     await sendTransaction('forcePass', { functionName: 'forcePass', args: [selectedGameId] }, 'Turn forced to next player.');
   }, [selectedGameId, sendTransaction]);
 
   const resign = useCallback(async () => {
-    if (!selectedGameId) return;
+    if (selectedGameId === null) return;
     await sendTransaction(
       'resign',
       { functionName: 'resign', args: [selectedGameId] },
@@ -954,7 +961,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     clearStoredGameRef();
   }, [clearStoredGameRef, selectedGameId, sendTransaction]);
 
-  const isSelectedGameActive = Boolean(selectedGameId);
+  const isSelectedGameActive = selectedGameId !== null;
 
   useWatchContractEvent({
     address: LUDO_CONTRACT_ADDRESS,
@@ -965,7 +972,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
       scheduleLobbyReload();
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId ?? 0);
-        if (selectedGameId && selectedGameId === gameId) {
+        if (selectedGameId !== null && selectedGameId === gameId) {
           scheduleRefresh(gameId);
         }
       });
@@ -983,7 +990,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
         const gameId = BigInt(log.args.gameId);
         const winner = getAddress(log.args.player as Address);
         winnerByGameRef.current.set(gameId.toString(), { winner, timestamp: Date.now() });
-        if (selectedGameId && selectedGameId === gameId) {
+        if (selectedGameId !== null && selectedGameId === gameId) {
           scheduleRefresh(gameId);
         }
       });
@@ -999,7 +1006,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
-        if (selectedGameId && selectedGameId === gameId) {
+        if (selectedGameId !== null && selectedGameId === gameId) {
           scheduleRefresh(gameId);
         }
       });
@@ -1015,7 +1022,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
-        if (selectedGameId && selectedGameId === gameId) {
+        if (selectedGameId !== null && selectedGameId === gameId) {
           scheduleRefresh(gameId);
         }
       });
@@ -1031,7 +1038,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
-        if (selectedGameId && selectedGameId === gameId) {
+        if (selectedGameId !== null && selectedGameId === gameId) {
           scheduleRefresh(gameId);
         }
       });
@@ -1047,7 +1054,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
-        if (selectedGameId && selectedGameId === gameId) {
+        if (selectedGameId !== null && selectedGameId === gameId) {
           scheduleRefresh(gameId);
         }
       });
@@ -1063,7 +1070,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
-        if (selectedGameId && selectedGameId === gameId) {
+        if (selectedGameId !== null && selectedGameId === gameId) {
           scheduleRefresh(gameId);
         }
       });
@@ -1079,7 +1086,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
-        if (selectedGameId && selectedGameId === gameId) {
+        if (selectedGameId !== null && selectedGameId === gameId) {
           scheduleRefresh(gameId);
         }
       });
@@ -1095,7 +1102,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
-        if (selectedGameId && selectedGameId === gameId) {
+        if (selectedGameId !== null && selectedGameId === gameId) {
           scheduleRefresh(gameId);
         }
       });

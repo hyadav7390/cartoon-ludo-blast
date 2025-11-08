@@ -89,11 +89,11 @@ export const PLAYER_COLORS: PlayerColor[] = ['red', 'blue', 'green', 'yellow'];
 
 // Placing pieces in home centers with specific offsets for each piece
 export const HOME_POSITIONS: Record<PlayerColor, Position[]> = {
-  blue: [
+  red: [
     { x: 3, y: 3 }, { x: 3.3, y: 2.7 },
     { x: 2.7, y: 2.7 }, { x: 2.7, y: 3.3 }
   ],
-  green: [
+  blue: [
     { x: 11, y: 3 }, { x: 11.3, y: 2.7 },
     { x: 10.7, y: 2.7 }, { x: 10.7, y: 3.3 }
   ],
@@ -101,7 +101,7 @@ export const HOME_POSITIONS: Record<PlayerColor, Position[]> = {
     { x: 11, y: 11 }, { x: 11.3, y: 10.7 },
     { x: 10.7, y: 10.7 }, { x: 10.7, y: 11.3 }
   ],
-  red: [
+  green: [
     { x: 3, y: 11 }, { x: 3.3, y: 10.7 },
     { x: 2.7, y: 10.7 }, { x: 2.7, y: 11.3 }
   ]
