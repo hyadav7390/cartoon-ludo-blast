@@ -313,7 +313,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
   const [availableGames, setAvailableGames] = useState<LobbySummary[]>([]);
   const [isLoadingLobbies, setIsLoadingLobbies] = useState(false);
   const [selectedGameId, setSelectedGameId] = useState<bigint | null>(null);
-  const [lastKnownGameId, setLastKnownGameId] = useState<bigint | null>(null);
+  const [storedGameRef, setStoredGameRef] = useState<{ id: bigint; owner: string } | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [isHydratingGame, setIsHydratingGame] = useState(false);
   const [turnTimer, setTurnTimer] = useState(DICE_WAIT_TIMER);
@@ -324,17 +324,28 @@ export const useGameLogic = (): UseGameLogicReturn => {
   const legalMovesCacheRef = useRef<{ key: string; timestamp: number; moves: string[] } | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingReloadRef = useRef<boolean>(false);
+  const lobbyReloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSnapshotAtRef = useRef<number>(0);
   const hasLoadedLastGameRef = useRef(false);
 
-  const persistLastGameId = useCallback((value: bigint | null) => {
+  const lastKnownGameId = useMemo(() => storedGameRef?.id ?? null, [storedGameRef]);
+
+  const persistLastGameRef = useCallback((value: { id: bigint; owner: string } | null) => {
     if (typeof window === 'undefined') return;
-    if (value !== null) {
-      window.localStorage.setItem(LAST_GAME_STORAGE_KEY, value.toString());
+    if (value) {
+      window.localStorage.setItem(
+        LAST_GAME_STORAGE_KEY,
+        JSON.stringify({ gameId: value.id.toString(), owner: value.owner }),
+      );
     } else {
       window.localStorage.removeItem(LAST_GAME_STORAGE_KEY);
     }
   }, []);
+
+  const clearStoredGameRef = useCallback(() => {
+    setStoredGameRef(null);
+    persistLastGameRef(null);
+  }, [persistLastGameRef]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || hasLoadedLastGameRef.current) return;
@@ -342,15 +353,13 @@ export const useGameLogic = (): UseGameLogicReturn => {
     const stored = window.localStorage.getItem(LAST_GAME_STORAGE_KEY);
     if (!stored) return;
     try {
-      const parsed = BigInt(stored);
-      setLastKnownGameId(parsed);
-      if (!selectedGameId) {
-        setSelectedGameId(parsed);
-      }
+      const parsed = JSON.parse(stored) as { gameId: string; owner: string };
+      if (!parsed?.gameId || !parsed?.owner) return;
+      setStoredGameRef({ id: BigInt(parsed.gameId), owner: parsed.owner.toLowerCase() });
     } catch {
       window.localStorage.removeItem(LAST_GAME_STORAGE_KEY);
     }
-  }, [selectedGameId]);
+  }, []);
 
   const scheduleRefresh = useCallback(
     (gameId?: bigint) => {
@@ -520,25 +529,34 @@ export const useGameLogic = (): UseGameLogicReturn => {
           ? players.some((player) => player.address.toLowerCase() === effectiveAddress.toLowerCase())
           : false;
 
-        if (userSeated && state.gameStatus !== 'finished') {
-          setLastKnownGameId(gameId);
-          persistLastGameId(gameId);
-        } else if ((!userSeated || state.gameStatus === 'finished') && lastKnownGameId === gameId) {
-          setLastKnownGameId(null);
-          persistLastGameId(null);
+        if (userSeated && state.gameStatus !== 'finished' && effectiveAddress) {
+          const ref = { id: gameId, owner: effectiveAddress.toLowerCase() };
+          setStoredGameRef(ref);
+          persistLastGameRef(ref);
+        } else if (
+          storedGameRef &&
+          storedGameRef.id === gameId &&
+          (!userSeated || state.gameStatus === 'finished')
+        ) {
+          clearStoredGameRef();
         }
       } catch (error) {
         console.error('Failed to refresh game snapshot', error);
+        const message = parseError(error);
         toast({
           title: 'Failed to fetch game state',
-          description: parseError(error),
+          description: message,
           variant: 'destructive',
         });
+        if (message === 'InvalidGameId') {
+          clearStoredGameRef();
+          setSelectedGameId(null);
+        }
       } finally {
         setIsHydratingGame(false);
       }
     },
-    [effectiveAddress, lastKnownGameId, pendingAction, persistLastGameId, publicClient, toast],
+    [clearStoredGameRef, effectiveAddress, pendingAction, persistLastGameRef, publicClient, storedGameRef, toast],
   );
 
   const reloadLobbies = useCallback(async () => {
@@ -602,6 +620,14 @@ export const useGameLogic = (): UseGameLogicReturn => {
       pendingReloadRef.current = false;
     }
   }, [publicClient, toast]);
+
+  const scheduleLobbyReload = useCallback(() => {
+    if (lobbyReloadTimeoutRef.current) return;
+    lobbyReloadTimeoutRef.current = setTimeout(() => {
+      lobbyReloadTimeoutRef.current = null;
+      void reloadLobbies();
+    }, 600);
+  }, [reloadLobbies]);
 
   useEffect(() => {
     void reloadLobbies();
@@ -787,6 +813,11 @@ export const useGameLogic = (): UseGameLogicReturn => {
               });
               const createdGameId = BigInt(args.gameId);
               setSelectedGameId(createdGameId);
+              if (effectiveAddress) {
+                const ref = { id: createdGameId, owner: effectiveAddress.toLowerCase() };
+                setStoredGameRef(ref);
+                persistLastGameRef(ref);
+              }
               break;
             } catch {
               // not the GameCreated event
@@ -816,7 +847,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
         setPendingAction(null);
       }
     },
-    [isWrongNetwork, publicClient, refetchGameState, reloadLobbies, toast, writeContractAsync],
+    [effectiveAddress, isWrongNetwork, persistLastGameRef, publicClient, refetchGameState, reloadLobbies, toast, writeContractAsync],
   );
 
   const createGame = useCallback(
@@ -881,10 +912,11 @@ export const useGameLogic = (): UseGameLogicReturn => {
         { refreshGame: false, refreshLobbies: true },
       );
       setSelectedGameId(gameId);
-      setLastKnownGameId(gameId);
-      persistLastGameId(gameId);
+      const ref = { id: gameId, owner: effectiveAddress.toLowerCase() };
+      setStoredGameRef(ref);
+      persistLastGameRef(ref);
     },
-    [availableGames, effectiveAddress, persistLastGameId, scheduleRefresh, sendTransaction, toast],
+    [availableGames, effectiveAddress, persistLastGameRef, scheduleRefresh, sendTransaction, toast],
   );
 
   const rollDice = useCallback(async () => {
@@ -919,9 +951,10 @@ export const useGameLogic = (): UseGameLogicReturn => {
       { refreshLobbies: true },
     );
     setSelectedGameId(null);
-    setLastKnownGameId(null);
-    persistLastGameId(null);
-  }, [persistLastGameId, selectedGameId, sendTransaction]);
+    clearStoredGameRef();
+  }, [clearStoredGameRef, selectedGameId, sendTransaction]);
+
+  const isSelectedGameActive = Boolean(selectedGameId);
 
   useWatchContractEvent({
     address: LUDO_CONTRACT_ADDRESS,
@@ -929,7 +962,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     chainId: TARGET_CHAIN_ID,
     eventName: 'LobbyUpdated',
     onLogs: (logs) => {
-      void reloadLobbies();
+      scheduleLobbyReload();
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId ?? 0);
         if (selectedGameId && selectedGameId === gameId) {
@@ -944,6 +977,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     abi: ludoAbi,
     chainId: TARGET_CHAIN_ID,
     eventName: 'PlayerWon',
+    enabled: isSelectedGameActive,
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
@@ -961,6 +995,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     abi: ludoAbi,
     chainId: TARGET_CHAIN_ID,
     eventName: 'PlayerDropped',
+    enabled: isSelectedGameActive,
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
@@ -976,6 +1011,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     abi: ludoAbi,
     chainId: TARGET_CHAIN_ID,
     eventName: 'PlayerResigned',
+    enabled: isSelectedGameActive,
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
@@ -991,6 +1027,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     abi: ludoAbi,
     chainId: TARGET_CHAIN_ID,
     eventName: 'DeadlineMissed',
+    enabled: isSelectedGameActive,
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
@@ -1006,7 +1043,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     abi: ludoAbi,
     chainId: TARGET_CHAIN_ID,
     eventName: 'DiceRolled',
-    enabled: Boolean(selectedGameId),
+    enabled: isSelectedGameActive,
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
@@ -1022,7 +1059,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     abi: ludoAbi,
     chainId: TARGET_CHAIN_ID,
     eventName: 'PieceMoved',
-    enabled: Boolean(selectedGameId),
+    enabled: isSelectedGameActive,
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
@@ -1038,7 +1075,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     abi: ludoAbi,
     chainId: TARGET_CHAIN_ID,
     eventName: 'TurnPassed',
-    enabled: Boolean(selectedGameId),
+    enabled: isSelectedGameActive,
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
@@ -1054,7 +1091,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     abi: ludoAbi,
     chainId: TARGET_CHAIN_ID,
     eventName: 'TurnForfeited',
-    enabled: Boolean(selectedGameId),
+    enabled: isSelectedGameActive,
     onLogs: (logs) => {
       logs.forEach((log) => {
         const gameId = BigInt(log.args.gameId);
@@ -1078,9 +1115,27 @@ export const useGameLogic = (): UseGameLogicReturn => {
   }, [effectiveAddress, gameState]);
 
   const resumeLastGame = useCallback(() => {
-    if (!lastKnownGameId) return;
-    setSelectedGameId(lastKnownGameId);
-  }, [lastKnownGameId]);
+    if (!storedGameRef) {
+      toast({ title: 'No resumable game', description: 'You do not have an active game to resume.', variant: 'destructive' });
+      return;
+    }
+    if (!effectiveAddress) {
+      toast({
+        title: 'Connect wallet',
+        description: 'Reconnect the wallet you used in the previous game to resume.',
+      });
+      return;
+    }
+    if (storedGameRef.owner && storedGameRef.owner !== effectiveAddress.toLowerCase()) {
+      toast({
+        title: 'Wrong wallet',
+        description: 'Switch to the wallet that created this game to continue.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setSelectedGameId(storedGameRef.id);
+  }, [effectiveAddress, storedGameRef, toast]);
 
   return {
     account: effectiveAddress,

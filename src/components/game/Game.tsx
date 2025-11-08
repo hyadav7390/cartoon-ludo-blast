@@ -1,5 +1,5 @@
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useGameLogic, type LobbySummary } from '@/hooks/useGameLogic';
 import { GameBoard } from './GameBoard';
 import { Dice } from './Dice';
@@ -10,6 +10,7 @@ import WalletConnectButton from '@/components/wallet/WalletConnectButton';
 import { cn } from '@/lib/utils';
 import { playSound } from '@/utils/gameUtils';
 import type { ActivityEntryView } from '@/types/game';
+import { useNavigate, useParams } from 'react-router-dom';
 
 const shorten = (value: string) => `${value.slice(0, 6)}...${value.slice(-4)}`;
 
@@ -34,6 +35,7 @@ const LobbyCard: React.FC<{ title: string; description: string; children: React.
 const GameLobby: React.FC<{
   onCreate: (seats: number, turnDuration: number) => void;
   onJoin: (gameId: bigint) => void;
+  onEnterGame?: (gameId: bigint) => void;
   availableGames: LobbySummary[];
   isLoading: boolean;
   pendingAction: string | null;
@@ -46,6 +48,7 @@ const GameLobby: React.FC<{
 }> = ({
   onCreate,
   onJoin,
+  onEnterGame,
   availableGames,
   isLoading,
   pendingAction,
@@ -118,21 +121,30 @@ const GameLobby: React.FC<{
                 (player) => currentAccount && player.address.toLowerCase() === currentAccount.toLowerCase(),
               );
               const isFull = lobby.players.length >= lobby.maxPlayers;
+              const canEnter = alreadyJoined && Boolean(onEnterGame);
               return (
                 <button
                   key={lobby.gameId.toString()}
                   className={cn(
                     'game-button border-dashed border-2 flex flex-col items-center justify-center py-4 space-y-2',
-                  (pendingAction === 'join' || alreadyJoined || isFull) && 'opacity-60 cursor-not-allowed',
-                )}
-                onClick={() => onJoin(lobby.gameId)}
-                disabled={pendingAction === 'join' || alreadyJoined || isFull}
-              >
-                <span className="text-2xl">🪑</span>
-                <span className="text-sm text-muted-foreground">Lobby #{lobby.gameId.toString()}</span>
-                <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                  {lobby.status === 'ready' ? 'Almost ready' : 'Open table'}
-                </span>
+                    (pendingAction === 'join' && !canEnter) && 'opacity-60 cursor-wait',
+                    !canEnter && alreadyJoined && 'opacity-60 cursor-not-allowed',
+                    !alreadyJoined && isFull && 'opacity-60 cursor-not-allowed',
+                  )}
+                  onClick={() => {
+                    if (alreadyJoined && canEnter) {
+                      onEnterGame?.(lobby.gameId);
+                    } else {
+                      onJoin(lobby.gameId);
+                    }
+                  }}
+                  disabled={(!alreadyJoined && (pendingAction === 'join' || isFull)) || (alreadyJoined && !canEnter)}
+                >
+                  <span className="text-2xl">🪑</span>
+                  <span className="text-sm text-muted-foreground">Lobby #{lobby.gameId.toString()}</span>
+                  <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                    {lobby.status === 'ready' ? 'Almost ready' : 'Open table'}
+                  </span>
                 <div className="flex items-center justify-center gap-1">
                   {Array.from({ length: lobby.maxPlayers }, (_, seat) => {
                     const player = lobby.players.find((summary) => summary.playerIndex === seat);
@@ -154,10 +166,16 @@ const GameLobby: React.FC<{
                 <span className="text-xs text-muted-foreground">
                   {lobby.players.length}/{lobby.maxPlayers} players · ⏱️ {lobby.turnDuration}s turns
                 </span>
-                <span className="text-base font-semibold">
-                  {alreadyJoined ? 'Already joined' : isFull ? 'Lobby full' : 'Join Game'}
-                </span>
-              </button>
+                  <span className="text-base font-semibold">
+                    {alreadyJoined
+                      ? canEnter
+                        ? 'Enter Game'
+                        : 'Already joined'
+                      : isFull
+                        ? 'Lobby full'
+                        : 'Join Game'}
+                  </span>
+                </button>
               );
             })}
           </div>
@@ -170,6 +188,8 @@ const GameLobby: React.FC<{
 export const Game: React.FC = () => {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [turnDurationSelection, setTurnDurationSelection] = useState(30);
+  const navigate = useNavigate();
+  const { gameId: routeGameIdParam } = useParams<{ gameId?: string }>();
 
   const {
     account,
@@ -198,6 +218,29 @@ export const Game: React.FC = () => {
   const pendingLabel = pendingAction ?? null;
 
   const activePlayers = useMemo(() => gameState?.players ?? [], [gameState]);
+
+  const routeGameId = routeGameIdParam ?? null;
+
+  useEffect(() => {
+    if (!routeGameId) return;
+    try {
+      const parsed = BigInt(routeGameId);
+      if (!selectedGameId || selectedGameId !== parsed) {
+        selectGame(parsed);
+      }
+    } catch {
+      navigate('/', { replace: true });
+    }
+  }, [navigate, routeGameId, selectGame, selectedGameId]);
+
+  useEffect(() => {
+    if (selectedGameId) {
+      const expected = selectedGameId.toString();
+      if (routeGameId !== expected) {
+        navigate(`/game/${expected}`, { replace: true });
+      }
+    }
+  }, [navigate, routeGameId, selectedGameId]);
 
   const handleCreate = async (count: number, duration: number) => {
     try {
@@ -237,6 +280,11 @@ export const Game: React.FC = () => {
 
   const handleReturnToLobby = () => {
     selectGame(null);
+    navigate('/', { replace: true });
+  };
+
+  const handleEnterExistingGame = (gameId: bigint) => {
+    selectGame(gameId);
   };
 
   const handleForcePass = async () => {
@@ -342,6 +390,7 @@ export const Game: React.FC = () => {
         <GameLobby
           onCreate={handleCreate}
           onJoin={handleJoin}
+          onEnterGame={handleEnterExistingGame}
           availableGames={availableGames}
           isLoading={isLoadingAvailableGames}
           pendingAction={pendingLabel}

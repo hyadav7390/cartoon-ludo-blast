@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 
 const WalletConnectButton = () => {
   const { address, chainId } = useAccount();
-  const { connectors, connect, isLoading: isConnecting, pendingConnector } = useConnect();
+  const { connectors, connectAsync, isLoading: isConnecting, pendingConnector } = useConnect();
   const { disconnect } = useDisconnect();
   const { switchChain, isPending: isSwitching, chains } = useSwitchChain();
   const { data: balanceData } = useBalance({
@@ -55,19 +55,20 @@ const WalletConnectButton = () => {
 
   const handleConnect = (connector: typeof availableConnectors[number] | undefined) => {
     if (!connector) return;
-    connect({ connector }).catch((error) => {
+    connectAsync({ connector }).catch((error) => {
       console.error('[wallet] Failed to connect', error);
     });
   };
 
   if (!address) {
-    const connectorsPresent = Boolean(primaryConnector);
-    const primaryPending = pendingConnector?.uid === primaryConnector?.uid && isConnecting;
+    const connectorsPresent = availableConnectors.length > 0;
+    const targetConnector = primaryConnector ?? availableConnectors[0];
+    const primaryPending = targetConnector && pendingConnector?.uid === targetConnector.uid && isConnecting;
 
     return (
       <div className="flex flex-wrap items-center gap-2">
         <Button
-          onClick={() => handleConnect(primaryConnector)}
+          onClick={() => handleConnect(targetConnector)}
           className="flex items-center gap-2"
           disabled={!connectorsPresent || isConnecting}
         >
