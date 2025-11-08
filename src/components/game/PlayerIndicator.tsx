@@ -6,12 +6,14 @@ interface PlayerIndicatorProps {
   player: Player;
   isActive: boolean;
   timer?: number;
+  turnDuration?: number;
 }
 
-export const PlayerIndicator: React.FC<PlayerIndicatorProps> = ({ 
-  player, 
-  isActive, 
-  timer 
+export const PlayerIndicator: React.FC<PlayerIndicatorProps> = ({
+  player,
+  isActive,
+  timer,
+  turnDuration = 30,
 }) => {
   const getPlayerColorClass = (color: string) => {
     switch (color) {
@@ -82,16 +84,16 @@ export const PlayerIndicator: React.FC<PlayerIndicatorProps> = ({
                   'h-full transition-all duration-1000 ease-linear rounded-full',
                   timer <= 10 ? 'bg-gradient-to-r from-red-500 to-red-600' : 'bg-gradient-to-r from-[hsl(var(--success))] to-[hsl(var(--success))]'
                 )}
-                style={{ width: `${(timer / 30) * 100}%` }}
+                style={{ width: `${Math.max(0, Math.min(100, (timer / turnDuration) * 100))}%` }}
               />
             </div>
           </div>
         )}
       </div>
       
-      {player.skippedTurns > 0 && (
+      {player.missedDeadlines > 0 && (
         <div className="mt-2 text-xs text-warning font-medium bg-warning/10 rounded px-2 py-1 border border-warning/20">
-          ⚠️ Skipped: {player.skippedTurns}/3
+          ⚠️ Missed turns: {player.missedDeadlines}
         </div>
       )}
 

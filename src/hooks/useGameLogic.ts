@@ -1,415 +1,1112 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Address,
+  BaseError,
+  decodeErrorResult,
+  decodeEventLog,
+  getAddress,
+  zeroAddress,
+} from 'viem';
+import {
+  useAccount,
+  usePublicClient,
+  useWatchContractEvent,
+  useWriteContract,
+} from 'wagmi';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { GameState, Player, GamePiece, PIECES_PER_PLAYER, TOTAL_MAIN_SQUARES, HOME_COLUMN_SQUARES } from '@/types/game';
-import { START_POSITIONS, SAFE_SQUARES } from '@/utils/boardPositions';
-import { canMovePiece, createInitialGameState, getHomePositionForPiece, getBoardPosition, getHomeColumnPosition } from '@/utils/gameUtils';
+import { useToast } from '@/hooks/use-toast';
+import { TARGET_CHAIN_ID } from '@/configs';
+import { LUDO_CONTRACT_ADDRESS, PlayerColorEnum, ludoAbi } from '@/contracts/ludo';
+import {
+  ActivityEntryView,
+  ActivityKind,
+  GamePiece,
+  GameState,
+  Player,
+  PlayerColor,
+  HOME_COLUMN_SQUARES,
+  HOME_POSITIONS,
+  PIECES_PER_PLAYER,
+  TOTAL_MAIN_SQUARES,
+} from '@/types/game';
+import { getBoardPosition, getHomeColumnPosition } from '@/utils/boardPositions';
 
-export const useGameLogic = (playerCount: number = 4) => {
-  const [gameState, setGameState] = useState<GameState>(() => 
-    createInitialGameState(playerCount)
+const DICE_WAIT_TIMER = 30;
+const LEGAL_MOVES_CACHE_TTL_MS = 3_000;
+const LOBBY_PAGE_SIZE = 12n;
+const MAX_OPEN_LOBBIES = 48;
+const ACTIVITY_HISTORY_COUNT = 20;
+const LAST_GAME_STORAGE_KEY = 'ludo:lastGameId';
+
+type PendingAction = 'create' | 'join' | 'roll' | 'move' | 'forcePass' | 'resign' | null;
+
+type LobbyStatus = 'waiting' | 'ready' | 'playing' | 'finished';
+
+interface SendTransactionOptions {
+  refreshGame?: boolean;
+  refreshLobbies?: boolean;
+}
+
+interface LobbyPlayerSummary {
+  address: Address;
+  color: PlayerColor;
+  playerIndex: number;
+  active: boolean;
+}
+
+interface LobbySummary {
+  gameId: bigint;
+  maxPlayers: number;
+  turnDuration: number;
+  creator: Address;
+  status: LobbyStatus;
+  players: LobbyPlayerSummary[];
+}
+
+interface UseGameLogicReturn {
+  account: Address | undefined;
+  availableGames: LobbySummary[];
+  isLoadingAvailableGames: boolean;
+  refetchAvailableGames: () => Promise<void>;
+  selectedGameId: bigint | null;
+  selectGame: (gameId: bigint | null) => void;
+  lastKnownGameId: bigint | null;
+  resumeLastGame: () => void;
+  gameState: GameState | null;
+  isGameLoading: boolean;
+  turnTimer: number;
+  validMoves: string[];
+  pendingAction: PendingAction;
+  isPlayerSeated: boolean;
+  isPlayerTurn: boolean;
+  isWrongNetwork: boolean;
+  createGame: (maxPlayers: number, turnDuration: number) => Promise<void>;
+  joinGame: (gameId: bigint) => Promise<void>;
+  rollDice: () => Promise<void>;
+  movePiece: (pieceId: string) => Promise<void>;
+  forcePass: () => Promise<void>;
+  resign: () => Promise<void>;
+  refetchGameState: () => Promise<void>;
+}
+
+interface WinnerRecord {
+  winner: Address;
+  timestamp: number;
+}
+
+type ContractLobbyView = {
+  gameId: bigint;
+  status: number;
+  maxPlayers: number;
+  turnDuration: number;
+  playerCount: number;
+  activePlayerCount: number;
+  creator: Address;
+  players: readonly Address[];
+  colors: readonly number[];
+  actives: readonly boolean[];
+};
+
+type ContractPlayerState = {
+  account: Address;
+  color: number;
+  active: boolean;
+  missedDeadlines: number;
+  positions: readonly number[];
+  finished: readonly boolean[];
+};
+
+type ContractGameSnapshot = {
+  status: number;
+  maxPlayers: number;
+  currentPlayerIndex: number;
+  activePlayerCount: number;
+  sixStreak: number;
+  diceValue: number;
+  turnDuration: number;
+  turnDeadline: bigint;
+  roller: Address;
+  players: readonly ContractPlayerState[];
+};
+
+const shortenAddress = (address: Address) =>
+  `${address.slice(0, 6)}...${address.slice(address.length - 4)}`;
+
+const capitalise = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+
+const playerColorFromEnum = (value: number): PlayerColor => {
+  switch (value) {
+    case PlayerColorEnum.Red:
+      return 'red';
+    case PlayerColorEnum.Blue:
+      return 'blue';
+    case PlayerColorEnum.Green:
+      return 'green';
+    case PlayerColorEnum.Yellow:
+      return 'yellow';
+    default:
+      return 'red';
+  }
+};
+
+const parseError = (error: unknown): string => {
+  if (error instanceof BaseError) {
+    try {
+      const decoded = decodeErrorResult({ abi: ludoAbi, data: (error as BaseError).shortMessageData ?? error.data ?? '0x' });
+      if (decoded?.errorName) {
+        return decoded.errorName;
+      }
+    } catch {
+      // ignore decode issues
+    }
+    return error.shortMessage;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return 'Unknown error';
+};
+
+const toPlayerId = (address: Address) => address.toLowerCase();
+
+const mapGameStatus = (value: number): LobbyStatus => {
+  switch (value) {
+    case 0:
+      return 'waiting';
+    case 1:
+      return 'ready';
+    case 2:
+      return 'playing';
+    case 3:
+      return 'finished';
+    default:
+      return 'waiting';
+  }
+};
+
+const mapActivityKind = (kind: number): ActivityKind => {
+  switch (kind) {
+    case 0:
+      return 'dice';
+    case 1:
+      return 'move';
+    case 2:
+      return 'turnPassed';
+    case 3:
+      return 'turnForfeited';
+    case 4:
+      return 'playerDropped';
+    case 5:
+      return 'playerResigned';
+    case 6:
+      return 'playerWon';
+    default:
+      return 'dice';
+  }
+};
+
+const mapPiecePosition = (
+  color: PlayerColor,
+  boardPosition: number,
+  pieceIndex: number,
+): Pick<GamePiece, 'position' | 'isInHome' | 'isInHomeColumn' | 'isFinished'> => {
+  if (boardPosition === -1) {
+    return {
+      position: HOME_POSITIONS[color][pieceIndex],
+      isInHome: true,
+      isInHomeColumn: false,
+      isFinished: false,
+    };
+  }
+
+  if (boardPosition === TOTAL_MAIN_SQUARES + HOME_COLUMN_SQUARES) {
+    return {
+      position: { x: 7, y: 7 },
+      isInHome: false,
+      isInHomeColumn: false,
+      isFinished: true,
+    };
+  }
+
+  if (boardPosition >= TOTAL_MAIN_SQUARES) {
+    const columnIndex = boardPosition - TOTAL_MAIN_SQUARES;
+    return {
+      position: getHomeColumnPosition(color, columnIndex),
+      isInHome: false,
+      isInHomeColumn: true,
+      isFinished: false,
+    };
+  }
+
+  return {
+    position: getBoardPosition(boardPosition),
+    isInHome: false,
+    isInHomeColumn: false,
+    isFinished: false,
+  };
+};
+
+const buildGameMessage = (state: GameState | null, account?: Address): string => {
+  if (!state) {
+    return 'Select a lobby to play Ludo on-chain.';
+  }
+
+  const joined = state.players.length;
+  const remaining = Math.max(state.maxPlayers - joined, 0);
+  const isSeated = account
+    ? state.players.some((player) => player.address.toLowerCase() === account.toLowerCase())
+    : false;
+
+  if (state.gameStatus === 'finished') {
+    return state.winner ? `${state.winner.name} wins the game!` : 'Game finished.';
+  }
+
+  if (state.gameStatus === 'waiting') {
+    return remaining === 0
+      ? 'Waiting for players to join.'
+      : isSeated
+        ? `Waiting for ${remaining} more player${remaining === 1 ? '' : 's'} to join…`
+        : `Lobby has ${joined}/${state.maxPlayers} players. Join in to start!`;
+  }
+
+  if (state.gameStatus === 'ready') {
+    const seatsLeft = Math.max(state.maxPlayers - joined, 0);
+    return seatsLeft === 0
+      ? 'Starting soon…'
+      : `Almost ready! ${seatsLeft} seat${seatsLeft === 1 ? '' : 's'} remaining.`;
+  }
+
+  if (state.gameStatus === 'playing') {
+    const activePlayer = state.players[state.currentPlayerIndex];
+    if (!activePlayer) {
+      return 'Awaiting the next turn…';
+    }
+    const isUsersTurn = account
+      ? activePlayer.address.toLowerCase() === account.toLowerCase()
+      : false;
+
+    if (state.diceValue !== null) {
+      return `${activePlayer.name} rolled a ${state.diceValue}. ${
+        isUsersTurn ? 'Choose a piece to move.' : 'Waiting for their move.'
+      }`;
+    }
+
+    const deadlineMessage = state.turnDeadline
+      ? `Turn ends in ${Math.max(0, Math.floor(state.turnDeadline - Date.now() / 1000))}s.`
+      : '';
+
+    return `${activePlayer.name}'s turn. ${isUsersTurn ? 'Roll the dice!' : 'Waiting for roll.'} ${deadlineMessage}`.trim();
+  }
+
+  return 'Loading game state…';
+};
+
+export const useGameLogic = (): UseGameLogicReturn => {
+  const { address, chainId } = useAccount();
+  const publicClient = usePublicClient({ chainId: TARGET_CHAIN_ID });
+  const { toast } = useToast();
+  const { writeContractAsync } = useWriteContract();
+
+  const isWrongNetwork = Boolean(chainId && chainId !== TARGET_CHAIN_ID);
+  const effectiveAddress = isWrongNetwork ? undefined : address;
+
+  const [availableGames, setAvailableGames] = useState<LobbySummary[]>([]);
+  const [isLoadingLobbies, setIsLoadingLobbies] = useState(false);
+  const [selectedGameId, setSelectedGameId] = useState<bigint | null>(null);
+  const [lastKnownGameId, setLastKnownGameId] = useState<bigint | null>(null);
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [isHydratingGame, setIsHydratingGame] = useState(false);
+  const [turnTimer, setTurnTimer] = useState(DICE_WAIT_TIMER);
+  const [validMoves, setValidMoves] = useState<string[]>([]);
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+
+  const winnerByGameRef = useRef<Map<string, WinnerRecord>>(new Map());
+  const legalMovesCacheRef = useRef<{ key: string; timestamp: number; moves: string[] } | null>(null);
+  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingReloadRef = useRef<boolean>(false);
+  const lastSnapshotAtRef = useRef<number>(0);
+  const hasLoadedLastGameRef = useRef(false);
+
+  const persistLastGameId = useCallback((value: bigint | null) => {
+    if (typeof window === 'undefined') return;
+    if (value !== null) {
+      window.localStorage.setItem(LAST_GAME_STORAGE_KEY, value.toString());
+    } else {
+      window.localStorage.removeItem(LAST_GAME_STORAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || hasLoadedLastGameRef.current) return;
+    hasLoadedLastGameRef.current = true;
+    const stored = window.localStorage.getItem(LAST_GAME_STORAGE_KEY);
+    if (!stored) return;
+    try {
+      const parsed = BigInt(stored);
+      setLastKnownGameId(parsed);
+      if (!selectedGameId) {
+        setSelectedGameId(parsed);
+      }
+    } catch {
+      window.localStorage.removeItem(LAST_GAME_STORAGE_KEY);
+    }
+  }, [selectedGameId]);
+
+  const scheduleRefresh = useCallback(
+    (gameId?: bigint) => {
+      const target = gameId ?? selectedGameId;
+      if (!target) return;
+      if (refreshTimeoutRef.current) return;
+      const now = Date.now();
+      if (now - lastSnapshotAtRef.current < 750) {
+        return;
+      }
+      refreshTimeoutRef.current = setTimeout(() => {
+        refreshTimeoutRef.current = null;
+        void refreshGameSnapshot(target);
+      }, 120);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedGameId],
   );
 
-  const [turnTimer, setTurnTimer] = useState<number>(30);
-  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const isAnimatingRef = useRef<boolean>(false);
+  const refreshGameSnapshot = useCallback(
+    async (gameId: bigint) => {
+      if (!publicClient) return;
+      setIsHydratingGame(true);
+      try {
+        const [snapshotRaw, activityRaw] = await Promise.all([
+          publicClient.readContract({
+            address: LUDO_CONTRACT_ADDRESS,
+            abi: ludoAbi,
+            functionName: 'getGameSnapshot',
+            args: [gameId],
+            chainId: TARGET_CHAIN_ID,
+          }) as Promise<ContractGameSnapshot>,
+          publicClient.readContract({
+            address: LUDO_CONTRACT_ADDRESS,
+            abi: ludoAbi,
+            functionName: 'getRecentActivity',
+            args: [gameId, ACTIVITY_HISTORY_COUNT],
+            chainId: TARGET_CHAIN_ID,
+          }) as Promise<
+            Array<{
+              kind: bigint;
+              player: Address;
+              dice: bigint;
+              pieceIndex: bigint;
+              fromPos: bigint;
+              toPos: bigint;
+              captured: boolean;
+              victimPlayerIdx: bigint;
+              victimPieceIdx: bigint;
+              at: bigint;
+            }>
+          >,
+        ]);
 
-  useEffect(() => {
-    setGameState(createInitialGameState(playerCount));
-    setTurnTimer(30);
-    isAnimatingRef.current = false;
-  }, [playerCount]);
+        const players: Player[] = snapshotRaw.players.map((playerState, index) => {
+          const playerAddress = getAddress(playerState.account as Address);
+          const color = playerColorFromEnum(Number(playerState.color ?? 0));
 
-  const skipTurn = useCallback(() => {
-    setGameState((prev) => {
-      const currentPlayer = prev.players[prev.currentPlayerIndex];
-      const updatedPlayer = {
-        ...currentPlayer,
-        skippedTurns: currentPlayer.skippedTurns + 1
-      };
-      
-      if (updatedPlayer.skippedTurns >= 3) {
-        const remainingPlayers = prev.players.filter(p => p.id !== currentPlayer.id);
-        if (remainingPlayers.length === 1) {
+          const pieces: GamePiece[] = Array.from({ length: PIECES_PER_PLAYER }, (_, pieceIndex) => {
+            const boardPosition = Number(playerState.positions[pieceIndex] ?? -1);
+            const base = mapPiecePosition(color, boardPosition, pieceIndex);
+            return {
+              id: `${color}-${pieceIndex}`,
+              playerId: playerAddress,
+              color,
+              position: base.position,
+              boardPosition,
+              isInHome: base.isInHome,
+              isInHomeColumn: base.isInHomeColumn,
+              isFinished:
+                Boolean(playerState.finished[pieceIndex]) ||
+                boardPosition === TOTAL_MAIN_SQUARES + HOME_COLUMN_SQUARES,
+              pieceIndex,
+            };
+          });
+
+          const name = `${capitalise(color)} · ${shortenAddress(playerAddress)}`;
+
           return {
-            ...prev,
-            gameStatus: 'finished',
-            winner: remainingPlayers[0],
-            gameMessage: `${remainingPlayers[0].name} wins! ${currentPlayer.name} was eliminated.`
+            id: toPlayerId(playerAddress),
+            address: playerAddress,
+            name,
+            color,
+            pieces,
+            isActive: Boolean(playerState.active),
+            missedDeadlines: Number(playerState.missedDeadlines ?? 0),
+            playerIndex: index,
           };
-        }
-      }
-
-      const updatedPlayers = prev.players.map(p => p.id === currentPlayer.id ? updatedPlayer : p);
-      const nextPlayerIndex = (prev.currentPlayerIndex + 1) % prev.players.length;
-
-      return {
-        ...prev,
-        players: updatedPlayers,
-        currentPlayerIndex: nextPlayerIndex,
-        diceValue: null,
-        consecutiveSixes: 0,
-        gameMessage: `${currentPlayer.name} skipped turn. ${prev.players[nextPlayerIndex].name}'s turn.`
-      };
-    });
-    setTurnTimer(30);
-  }, []);
-
-  // Timer logic - fixed dependency issue
-  useEffect(() => {
-    if (gameState.gameStatus === 'playing' && gameState.diceValue === null && !gameState.isRolling && !isAnimatingRef.current) {
-      const interval = setInterval(() => {
-        setTurnTimer((prev) => {
-          if (prev <= 1) {
-            skipTurn();
-            return 30;
-          }
-          return prev - 1;
         });
-      }, 1000);
-      timerIntervalRef.current = interval;
-      return () => {
-        clearInterval(interval);
-        timerIntervalRef.current = null;
-      };
-    } else {
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current);
-        timerIntervalRef.current = null;
-      }
-    }
-  }, [gameState.gameStatus, gameState.isRolling, gameState.diceValue, gameState.currentPlayerIndex, skipTurn]);
 
-  useEffect(() => {
-    return () => {
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current);
-        timerIntervalRef.current = null;
-      }
-    };
-  }, []);
-
-  // Auto-advance when no valid moves or only 1 valid move
-  useEffect(() => {
-    if (gameState.gameStatus === 'playing' && gameState.diceValue !== null) {
-      const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-      const validMoves = currentPlayer.pieces.filter(piece => canMovePiece(piece, gameState.diceValue!));
-      
-      if (validMoves.length === 0) {
-        // No valid moves - auto advance after 2 seconds
-        const timer = setTimeout(() => {
-          const nextPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
-          const nextPlayer = gameState.players[nextPlayerIndex];
-          
-          setGameState(prev => ({
-            ...prev,
-            diceValue: null,
-            currentPlayerIndex: nextPlayerIndex,
-            consecutiveSixes: 0,
-            gameMessage: `No valid moves. ${nextPlayer.name}'s turn.`
-          }));
-          setTurnTimer(30);
-        }, 2000);
-        
-        return () => clearTimeout(timer);
-      } else if (validMoves.length === 1) {
-        // Only 1 valid move - auto advance after 1 second
-        const timer = setTimeout(() => {
-          const pieceToMove = validMoves[0];
-          movePieceHandler(pieceToMove.id);
-        }, 1000);
-        
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [gameState.diceValue, gameState.gameStatus, gameState.currentPlayerIndex, gameState.players]);
-
-  const rollDice = useCallback(() => {
-    if (gameState.isRolling || gameState.diceValue !== null || isAnimatingRef.current) return;
-
-    setGameState(prev => ({ ...prev, isRolling: true, gameMessage: 'Rolling dice...' }));
-    setTurnTimer(30);
-
-    setTimeout(() => {
-      const diceValue = Math.floor(Math.random() * 6) + 1;
-      
-      setGameState(prev => {
-        const currentPlayerIndex = prev.currentPlayerIndex;
-        const currentPlayer = prev.players[currentPlayerIndex];
-        const newConsecutiveSixes = diceValue === 6 ? prev.consecutiveSixes + 1 : 0;
-        const playersWithResetSkips = prev.players.map((player, index) =>
-          index === currentPlayerIndex ? { ...player, skippedTurns: 0 } : player
-        );
-
-        if (newConsecutiveSixes === 3) {
-          const nextPlayerIndex = (prev.currentPlayerIndex + 1) % prev.players.length;
+        const activity: ActivityEntryView[] = activityRaw.map((entry, index) => {
+          const diceValue = Number(entry.dice ?? 0n);
+          const pieceIdx = Number(entry.pieceIndex ?? -1n);
+          const victimPlayerIdx = Number(entry.victimPlayerIdx ?? -1n);
+          const victimPieceIdx = Number(entry.victimPieceIdx ?? -1n);
           return {
-            ...prev,
-            players: playersWithResetSkips,
-            isRolling: false,
-            diceValue: null,
-            currentPlayerIndex: nextPlayerIndex,
-            consecutiveSixes: 0,
-            gameMessage: `${currentPlayer.name} rolled three sixes! Turn skipped. ${prev.players[nextPlayerIndex].name}'s turn.`
+            id: `${gameId.toString()}-${entry.at.toString()}-${index}`,
+            kind: mapActivityKind(Number(entry.kind)),
+            player: entry.player,
+            dice: diceValue > 0 ? diceValue : undefined,
+            pieceIndex: pieceIdx >= 0 ? pieceIdx : undefined,
+            from: Number(entry.fromPos ?? 0n),
+            to: Number(entry.toPos ?? 0n),
+            captured: Boolean(entry.captured),
+            victimPlayerIdx: victimPlayerIdx >= 0 ? victimPlayerIdx : undefined,
+            victimPieceIdx: victimPieceIdx >= 0 ? victimPieceIdx : undefined,
+            timestamp: Number(entry.at ?? 0n) * 1000,
           };
-        }
+        });
 
-        return {
-          ...prev,
-          players: playersWithResetSkips,
-          isRolling: false,
-          diceValue,
-          consecutiveSixes: newConsecutiveSixes,
-          gameMessage: `${currentPlayer.name} rolled a ${diceValue}.`
-        };
-      });
-    }, 1000);
-  }, [gameState.isRolling, gameState.diceValue, gameState.currentPlayerIndex, gameState.consecutiveSixes, gameState.players]);
+        const currentPlayerIndex = Number(snapshotRaw.currentPlayerIndex ?? 0);
+        const diceValueNumber = Number(snapshotRaw.diceValue ?? 0);
+        const turnDeadlineNumber = Number(snapshotRaw.turnDeadline ?? 0n);
+        const winnerRecord = winnerByGameRef.current.get(gameId.toString());
 
-  const getValidMoves = useCallback((diceValue: number): string[] => {
-    if (!diceValue) return [];
-    
-    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-    const validMoves: string[] = [];
-    
-    currentPlayer.pieces.forEach(piece => {
-      if (canMovePiece(piece, diceValue)) {
-        validMoves.push(piece.id);
-      }
-    });
-    
-    return validMoves;
-  }, [gameState.players, gameState.currentPlayerIndex]);
+        let gameStatus: GameState['gameStatus'] = mapGameStatus(Number(snapshotRaw.status ?? 0));
+        let winnerPlayer = winnerRecord
+          ? players.find((player) => player.address.toLowerCase() === winnerRecord.winner.toLowerCase()) ?? null
+          : null;
 
-  const movePieceHandler = useCallback((pieceId: string) => {
-    if (!gameState.diceValue || isAnimatingRef.current) return;
-
-    const currentPlayerIndex = gameState.currentPlayerIndex;
-    const currentPlayer = gameState.players[currentPlayerIndex];
-    const piece = currentPlayer.pieces.find(p => p.id === pieceId);
-
-    if (!piece || !canMovePiece(piece, gameState.diceValue)) return;
-
-    const diceValue = gameState.diceValue;
-    const playerStartPos = START_POSITIONS[piece.color];
-    const finishColumnIndex = HOME_COLUMN_SQUARES - 1;
-    const finishBoardPosition = TOTAL_MAIN_SQUARES + HOME_COLUMN_SQUARES;
-
-    type Step = { boardPosition: number; x: number; y: number; isInHomeColumn: boolean; isFinished: boolean };
-    const steps: Step[] = [];
-
-    if (piece.isInHome && diceValue === 6) {
-      const boardPos = playerStartPos;
-      const pos = getBoardPosition(boardPos);
-      steps.push({ boardPosition: boardPos, x: pos.x, y: pos.y, isInHomeColumn: false, isFinished: false });
-    } else {
-      let inHomeColumn = piece.isInHomeColumn;
-      let currentBoardPos = piece.boardPosition;
-      let currentHomePos = piece.isInHomeColumn ? piece.boardPosition - TOTAL_MAIN_SQUARES : -1;
-      const homeEntryThreshold = TOTAL_MAIN_SQUARES - HOME_COLUMN_SQUARES;
-
-      for (let step = 1; step <= diceValue; step++) {
-        if (!inHomeColumn) {
-          const normalized = (currentBoardPos >= playerStartPos)
-            ? currentBoardPos - playerStartPos
-            : TOTAL_MAIN_SQUARES - playerStartPos + currentBoardPos;
-          const willEnterHome = normalized < homeEntryThreshold && normalized + 1 >= homeEntryThreshold;
-
-          if (willEnterHome) {
-            const stepsIntoHomeColumn = normalized + 1 - homeEntryThreshold;
-            const nextHomePos = Math.min(stepsIntoHomeColumn, finishColumnIndex);
-
-            if (nextHomePos >= finishColumnIndex) {
-              steps.push({ boardPosition: finishBoardPosition, x: 7, y: 7, isInHomeColumn: false, isFinished: true });
-              inHomeColumn = false;
-              currentHomePos = finishColumnIndex;
-              break;
+        if (!winnerPlayer) {
+          const winEntry = activity.find((entry) => entry.kind === 'playerWon');
+          if (winEntry) {
+            winnerPlayer =
+              players.find((player) => player.address.toLowerCase() === winEntry.player.toLowerCase()) ?? null;
+            if (winnerPlayer) {
+              winnerByGameRef.current.set(gameId.toString(), { winner: winnerPlayer.address, timestamp: Date.now() });
+              gameStatus = 'finished';
             }
-
-            const boardPos = TOTAL_MAIN_SQUARES + nextHomePos;
-            const pos = getHomeColumnPosition(piece.color, nextHomePos);
-            steps.push({ boardPosition: boardPos, x: pos.x, y: pos.y, isInHomeColumn: true, isFinished: false });
-            inHomeColumn = true;
-            currentHomePos = nextHomePos;
-          } else {
-            const boardPos = (currentBoardPos + 1) % TOTAL_MAIN_SQUARES;
-            const pos = getBoardPosition(boardPos);
-            steps.push({ boardPosition: boardPos, x: pos.x, y: pos.y, isInHomeColumn: false, isFinished: false });
-            currentBoardPos = boardPos;
           }
         } else {
-          const nextHomePos = currentHomePos + 1;
-          if (nextHomePos >= finishColumnIndex) {
-            steps.push({ boardPosition: finishBoardPosition, x: 7, y: 7, isInHomeColumn: false, isFinished: true });
-            inHomeColumn = false;
-            currentHomePos = finishColumnIndex;
-            break;
-          }
-
-          const boardPos = TOTAL_MAIN_SQUARES + nextHomePos;
-          const pos = getHomeColumnPosition(piece.color, nextHomePos);
-          steps.push({ boardPosition: boardPos, x: pos.x, y: pos.y, isInHomeColumn: true, isFinished: false });
-          currentHomePos = nextHomePos;
+          gameStatus = 'finished';
         }
-      }
-    }
 
-    if (steps.length === 0) {
+        const diceValueOrNull = diceValueNumber === 0 ? null : diceValueNumber;
+        const currentPlayer = players[currentPlayerIndex];
+        const rollerAddress =
+          snapshotRaw.roller && snapshotRaw.roller !== zeroAddress
+            ? snapshotRaw.roller
+            : currentPlayer
+              ? currentPlayer.address
+              : null;
+
+        const state: GameState = {
+          gameId,
+          maxPlayers: Number(snapshotRaw.maxPlayers ?? players.length),
+          turnDuration: Number(snapshotRaw.turnDuration ?? DICE_WAIT_TIMER),
+          turnDeadline: turnDeadlineNumber === 0 ? null : turnDeadlineNumber,
+          players,
+          currentPlayerIndex,
+          diceValue: diceValueOrNull,
+          isRolling: pendingAction === 'roll',
+          gameStatus,
+          winner: winnerPlayer,
+          moveHistory: [],
+          sixStreak: Number(snapshotRaw.sixStreak ?? 0),
+          gameMessage: '',
+          roller: rollerAddress,
+          activity,
+        };
+
+        state.gameMessage = buildGameMessage(state, effectiveAddress);
+        setGameState(state);
+        lastSnapshotAtRef.current = Date.now();
+
+        const userSeated = effectiveAddress
+          ? players.some((player) => player.address.toLowerCase() === effectiveAddress.toLowerCase())
+          : false;
+
+        if (userSeated && state.gameStatus !== 'finished') {
+          setLastKnownGameId(gameId);
+          persistLastGameId(gameId);
+        } else if ((!userSeated || state.gameStatus === 'finished') && lastKnownGameId === gameId) {
+          setLastKnownGameId(null);
+          persistLastGameId(null);
+        }
+      } catch (error) {
+        console.error('Failed to refresh game snapshot', error);
+        toast({
+          title: 'Failed to fetch game state',
+          description: parseError(error),
+          variant: 'destructive',
+        });
+      } finally {
+        setIsHydratingGame(false);
+      }
+    },
+    [effectiveAddress, lastKnownGameId, pendingAction, persistLastGameId, publicClient, toast],
+  );
+
+  const reloadLobbies = useCallback(async () => {
+    if (!publicClient || pendingReloadRef.current) return;
+    pendingReloadRef.current = true;
+    setIsLoadingLobbies(true);
+    try {
+      const aggregated: LobbySummary[] = [];
+      let cursor = 0n;
+      let shouldContinue = true;
+
+      while (shouldContinue) {
+        const response = (await publicClient.readContract({
+          address: LUDO_CONTRACT_ADDRESS,
+          abi: ludoAbi,
+          functionName: 'getOpenGames',
+          args: [cursor, LOBBY_PAGE_SIZE],
+          chainId: TARGET_CHAIN_ID,
+        })) as [ContractLobbyView[], bigint];
+
+        const rawLobbies = response[0] ?? [];
+        const nextCursor = response[1] ?? 0n;
+
+        rawLobbies.forEach((view) => {
+          const players: LobbyPlayerSummary[] = view.players.map((playerAddress, index) => ({
+            address: getAddress(playerAddress as Address),
+            color: playerColorFromEnum(Number(view.colors[index] ?? 0)),
+            playerIndex: index,
+            active: Boolean(view.actives[index]),
+          }));
+
+          aggregated.push({
+            gameId: view.gameId,
+            maxPlayers: Number(view.maxPlayers ?? players.length),
+            turnDuration: Number(view.turnDuration ?? DICE_WAIT_TIMER),
+            creator: getAddress(view.creator as Address),
+            status: mapGameStatus(Number(view.status ?? 0)),
+            players,
+          });
+        });
+
+        cursor = nextCursor;
+        shouldContinue =
+          rawLobbies.length > 0 && cursor !== 0n && aggregated.length < MAX_OPEN_LOBBIES;
+      }
+
+      setAvailableGames(
+        aggregated
+          .sort((a, b) => Number(b.gameId - a.gameId))
+          .slice(0, MAX_OPEN_LOBBIES),
+      );
+    } catch (error) {
+      console.error('Failed to load lobbies', error);
+      toast({
+        title: 'Unable to load lobbies',
+        description: parseError(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoadingLobbies(false);
+      pendingReloadRef.current = false;
+    }
+  }, [publicClient, toast]);
+
+  useEffect(() => {
+    void reloadLobbies();
+  }, [reloadLobbies]);
+
+  useEffect(() => {
+    if (!selectedGameId) {
+      setGameState(null);
+      setValidMoves([]);
+      return;
+    }
+    void refreshGameSnapshot(selectedGameId);
+  }, [refreshGameSnapshot, selectedGameId]);
+
+  useEffect(() => {
+    if (!gameState) {
+      setTurnTimer(DICE_WAIT_TIMER);
       return;
     }
 
-    // Run animation
-    isAnimatingRef.current = true;
-    const perStepDelayMs = 140;
+    if (!gameState.turnDeadline || gameState.gameStatus !== 'playing') {
+      setTurnTimer(gameState.turnDuration || DICE_WAIT_TIMER);
+      return;
+    }
 
-    const applyStep = (stepIndex: number) => {
-      const step = steps[stepIndex];
-      setGameState(prev => {
-        const updatedPlayers = prev.players.map(player => {
-          if (player.id !== currentPlayer.id) return player;
-          return {
-            ...player,
-            pieces: player.pieces.map(p => {
-              if (p.id !== pieceId) return p;
-              return {
-                ...p,
-                position: { x: step.x, y: step.y },
-                boardPosition: step.boardPosition,
-                isInHome: false,
-                isInHomeColumn: step.isInHomeColumn,
-                isFinished: step.isFinished
-              } as GamePiece;
-            })
-          } as Player;
-        });
-        return { ...prev, players: updatedPlayers } as GameState;
-      });
+    const updateTimer = () => {
+      const now = Math.floor(Date.now() / 1000);
+      const remaining = Math.max(0, gameState.turnDeadline - now);
+      setTurnTimer(remaining);
+    };
 
-      if (stepIndex + 1 < steps.length) {
-        setTimeout(() => applyStep(stepIndex + 1), perStepDelayMs);
-      } else {
-        // Finalize: handle captures, messages, turn progression
-        setTimeout(() => {
-          const finalStep = steps[steps.length - 1];
-          let gameMessage = '';
-          const capturedPieces: GamePiece[] = [];
+    updateTimer();
+    const interval = setInterval(updateTimer, 1_000);
+    return () => clearInterval(interval);
+  }, [gameState]);
 
-          // Determine message type
-          if (piece.isInHome && diceValue === 6) {
-            gameMessage = `${currentPlayer.name} entered the board!`;
-          } else if (finalStep.isFinished) {
-            gameMessage = `${currentPlayer.name} reached home!`;
-          } else if (finalStep.isInHomeColumn) {
-            gameMessage = `${currentPlayer.name} entered home column!`;
-          } else {
-            gameMessage = `${currentPlayer.name} moved.`;
-          }
+  useEffect(() => {
+    if (!publicClient || !selectedGameId || !gameState || !effectiveAddress) {
+      setValidMoves([]);
+      legalMovesCacheRef.current = null;
+      return;
+    }
 
-          // Capture only if ending on main path and not on safe square
-          if (!finalStep.isInHomeColumn && !finalStep.isFinished && !SAFE_SQUARES.includes(finalStep.boardPosition)) {
-            setGameState(prev => {
-              const updatedPlayers = prev.players.map(player => {
-                if (player.id === currentPlayer.id) return player;
-                const updatedPieces = player.pieces.map(op => {
-                  if (op.boardPosition === finalStep.boardPosition && !op.isInHome && !op.isFinished) {
-                    capturedPieces.push(op);
-                    const homePos = getHomePositionForPiece(op);
-                    return { ...op, position: homePos, boardPosition: -1, isInHome: true, isInHomeColumn: false, isFinished: false } as GamePiece;
-                  }
-                  return op;
-                });
-                return { ...player, pieces: updatedPieces } as Player;
-              });
-              return { ...prev, players: updatedPlayers } as GameState;
-            });
-            if (capturedPieces.length > 0) {
-              gameMessage += ` Captured ${capturedPieces.length} piece${capturedPieces.length > 1 ? 's' : ''}!`;
-            }
-          }
+    if (isWrongNetwork) {
+      setValidMoves([]);
+      legalMovesCacheRef.current = null;
+      return;
+    }
 
-          // Final state update: next player / win
-          setGameState(prev => {
-            const resolvedCurrentIndex = prev.players.findIndex(p => p.id === currentPlayer.id);
-            const activeIndex = resolvedCurrentIndex === -1 ? prev.currentPlayerIndex : resolvedCurrentIndex;
-            const updatedPlayers = prev.players.map(player => {
-              if (player.id !== currentPlayer.id) {
-                return player;
-              }
-              return {
-                ...player,
-                skippedTurns: 0,
-                pieces: player.pieces.map(p => p.id === pieceId ? {
-                  ...p,
-                  position: { x: finalStep.x, y: finalStep.y },
-                  boardPosition: finalStep.boardPosition,
-                  isInHome: false,
-                  isInHomeColumn: finalStep.isInHomeColumn,
-                  isFinished: finalStep.isFinished
-                } as GamePiece : p)
-              } as Player;
-            });
+    if (gameState.gameStatus !== 'playing' || gameState.diceValue === null) {
+      setValidMoves([]);
+      legalMovesCacheRef.current = null;
+      return;
+    }
 
-            const activePlayer = updatedPlayers[activeIndex];
-            const finishedPieces = activePlayer.pieces.filter(p => p.isFinished);
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+    if (!currentPlayer || currentPlayer.address.toLowerCase() !== effectiveAddress.toLowerCase()) {
+      setValidMoves([]);
+      legalMovesCacheRef.current = null;
+      return;
+    }
 
-            if (finishedPieces.length === PIECES_PER_PLAYER) {
-              isAnimatingRef.current = false;
-              return {
-                ...prev,
-                players: updatedPlayers,
-                gameStatus: 'finished',
-                winner: activePlayer,
-                diceValue: null,
-                gameMessage: `${activePlayer.name} wins the game!`
-              } as GameState;
-            }
+    const cacheKey = `${selectedGameId}-${gameState.gameStatus}-${gameState.diceValue}-${gameState.currentPlayerIndex}-${effectiveAddress}`;
+    const now = Date.now();
+    if (
+      legalMovesCacheRef.current &&
+      legalMovesCacheRef.current.key === cacheKey &&
+      now - legalMovesCacheRef.current.timestamp < LEGAL_MOVES_CACHE_TTL_MS
+    ) {
+      setValidMoves(legalMovesCacheRef.current.moves);
+      return;
+    }
 
-            const shouldPassTurn = diceValue !== 6 || prev.consecutiveSixes >= 2;
-            const nextPlayerIndex = shouldPassTurn
-              ? (activeIndex + 1) % prev.players.length
-              : activeIndex;
-            const consecutiveSixes = diceValue === 6 && !shouldPassTurn
-              ? prev.consecutiveSixes
-              : 0;
+    let cancelled = false;
+    const fetchLegalMoves = async () => {
+      try {
+        const canMove = (await publicClient.readContract({
+          address: LUDO_CONTRACT_ADDRESS,
+          abi: ludoAbi,
+          functionName: 'legalMoves',
+          args: [selectedGameId, effectiveAddress],
+          chainId: TARGET_CHAIN_ID,
+        })) as boolean[];
 
-            isAnimatingRef.current = false;
-            return {
-              ...prev,
-              players: updatedPlayers,
-              currentPlayerIndex: nextPlayerIndex,
-              diceValue: null,
-              consecutiveSixes,
-              gameMessage: gameMessage + (nextPlayerIndex !== activeIndex ? ` ${updatedPlayers[nextPlayerIndex].name}'s turn.` : ' Roll again!')
-            } as GameState;
-          });
-          setTurnTimer(30);
-        }, perStepDelayMs);
+        if (cancelled) return;
+
+        const moves = currentPlayer.pieces
+          .filter((piece, index) => Boolean(canMove[index]))
+          .map((piece) => piece.id);
+
+        legalMovesCacheRef.current = {
+          key: cacheKey,
+          timestamp: now,
+          moves,
+        };
+        setValidMoves(moves);
+      } catch (error) {
+        console.warn('Failed to fetch legal moves', error);
+        if (!cancelled) {
+          setValidMoves([]);
+        }
       }
     };
 
-    applyStep(0);
-  }, [gameState.diceValue, gameState.players, gameState.currentPlayerIndex, gameState.consecutiveSixes]);
+    fetchLegalMoves();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    effectiveAddress,
+    gameState,
+    isWrongNetwork,
+    publicClient,
+    selectedGameId,
+  ]);
 
-  const startGame = useCallback(() => {
-    setGameState(prev => ({
-      ...prev,
-      gameStatus: 'playing',
-      gameMessage: 'Game started! Red player\'s turn.'
-    }));
-    setTurnTimer(30);
-  }, []);
+  const refetchGameState = useCallback(async () => {
+    if (selectedGameId) {
+      await refreshGameSnapshot(selectedGameId);
+    }
+  }, [refreshGameSnapshot, selectedGameId]);
 
-  const resetGame = useCallback(() => {
-    setGameState(createInitialGameState(playerCount));
-    setTurnTimer(30);
-  }, [playerCount]);
+  const refetchAvailableGames = useCallback(async () => {
+    await reloadLobbies();
+  }, [reloadLobbies]);
+
+  const sendTransaction = useCallback(
+    async (
+      action: PendingAction,
+      params:
+        | { functionName: 'createGame'; args: [bigint, bigint] }
+        | { functionName: 'joinGame'; args: [bigint] }
+        | { functionName: 'rollDice'; args: [bigint] }
+        | { functionName: 'movePiece'; args: [bigint, bigint] }
+        | { functionName: 'forcePass'; args: [bigint] }
+        | { functionName: 'resign'; args: [bigint] },
+      successMessage: string,
+      options?: SendTransactionOptions,
+    ) => {
+      const { refreshGame = true, refreshLobbies = false } = options ?? {};
+      if (!publicClient) {
+        toast({
+          title: 'Wallet not connected',
+          description: 'Connect your wallet to continue.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      if (isWrongNetwork) {
+        toast({
+          title: 'Wrong network',
+          description: 'Switch your wallet to the Sepolia network.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      setPendingAction(action);
+      try {
+        const hash = await writeContractAsync({
+          address: LUDO_CONTRACT_ADDRESS,
+          abi: ludoAbi,
+          functionName: params.functionName,
+          args: params.args,
+          chainId: TARGET_CHAIN_ID,
+        });
+
+        toast({ title: 'Transaction submitted', description: 'Waiting for confirmation…' });
+
+        const receipt = await publicClient.waitForTransactionReceipt({ hash, chainId: TARGET_CHAIN_ID });
+
+        toast({ title: 'Success', description: successMessage });
+
+        if (params.functionName === 'createGame') {
+          for (const log of receipt.logs) {
+            try {
+              const { args } = decodeEventLog({
+                abi: ludoAbi,
+                data: log.data,
+                topics: log.topics,
+                eventName: 'GameCreated',
+              });
+              const createdGameId = BigInt(args.gameId);
+              setSelectedGameId(createdGameId);
+              break;
+            } catch {
+              // not the GameCreated event
+            }
+          }
+        }
+
+        const refreshJobs: Promise<void>[] = [];
+        if (refreshLobbies) {
+          refreshJobs.push(reloadLobbies());
+        }
+        if (refreshGame) {
+          refreshJobs.push(refetchGameState());
+        }
+        if (refreshJobs.length > 0) {
+          await Promise.allSettled(refreshJobs);
+        }
+      } catch (error) {
+        const message = parseError(error);
+        toast({
+          title: 'Transaction failed',
+          description: message,
+          variant: 'destructive',
+        });
+        throw error;
+      } finally {
+        setPendingAction(null);
+      }
+    },
+    [isWrongNetwork, publicClient, refetchGameState, reloadLobbies, toast, writeContractAsync],
+  );
+
+  const createGame = useCallback(
+    async (maxPlayers: number, turnDuration: number) => {
+      if (!effectiveAddress) {
+        toast({ title: 'Connect wallet', description: 'Sign in to create a game lobby.' });
+        return;
+      }
+
+      if (isWrongNetwork) {
+        toast({
+          title: 'Wrong network',
+          description: 'Switch to the Sepolia network to create a lobby.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      await sendTransaction(
+        'create',
+        { functionName: 'createGame', args: [BigInt(maxPlayers), BigInt(turnDuration)] },
+        'Game lobby created.',
+        { refreshGame: false, refreshLobbies: true },
+      );
+    },
+    [effectiveAddress, isWrongNetwork, sendTransaction, toast],
+  );
+
+  const joinGame = useCallback(
+    async (gameId: bigint) => {
+      if (!effectiveAddress) {
+        toast({ title: 'Connect wallet', description: 'Sign in to join the lobby.' });
+        return;
+      }
+
+      const lobby = availableGames.find((game) => game.gameId === gameId);
+      if (lobby) {
+        const alreadyJoined = lobby.players.some(
+          (player) => player.address.toLowerCase() === effectiveAddress.toLowerCase(),
+        );
+        if (alreadyJoined) {
+          toast({ title: 'Already joined', description: 'You are already seated in this lobby.' });
+          setSelectedGameId(gameId);
+          return;
+        }
+
+        if (lobby.players.length >= lobby.maxPlayers) {
+          toast({
+            title: 'Lobby is full',
+            description: 'This lobby has already reached the maximum number of players.',
+            variant: 'destructive',
+          });
+          scheduleRefresh(gameId);
+          return;
+        }
+      }
+
+      await sendTransaction(
+        'join',
+        { functionName: 'joinGame', args: [gameId] },
+        'Joined the lobby.',
+        { refreshGame: false, refreshLobbies: true },
+      );
+      setSelectedGameId(gameId);
+      setLastKnownGameId(gameId);
+      persistLastGameId(gameId);
+    },
+    [availableGames, effectiveAddress, persistLastGameId, scheduleRefresh, sendTransaction, toast],
+  );
+
+  const rollDice = useCallback(async () => {
+    if (!selectedGameId) return;
+    await sendTransaction('roll', { functionName: 'rollDice', args: [selectedGameId] }, 'Dice rolled.');
+  }, [selectedGameId, sendTransaction]);
+
+  const movePiece = useCallback(
+    async (pieceId: string) => {
+      if (!selectedGameId) return;
+      const pieceIndex = Number(pieceId.split('-')[1] ?? '0');
+      await sendTransaction(
+        'move',
+        { functionName: 'movePiece', args: [selectedGameId, BigInt(pieceIndex)] },
+        'Piece moved.',
+      );
+    },
+    [selectedGameId, sendTransaction],
+  );
+
+  const forcePass = useCallback(async () => {
+    if (!selectedGameId) return;
+    await sendTransaction('forcePass', { functionName: 'forcePass', args: [selectedGameId] }, 'Turn forced to next player.');
+  }, [selectedGameId, sendTransaction]);
+
+  const resign = useCallback(async () => {
+    if (!selectedGameId) return;
+    await sendTransaction(
+      'resign',
+      { functionName: 'resign', args: [selectedGameId] },
+      'You have resigned from the game.',
+      { refreshLobbies: true },
+    );
+    setSelectedGameId(null);
+    setLastKnownGameId(null);
+    persistLastGameId(null);
+  }, [persistLastGameId, selectedGameId, sendTransaction]);
+
+  useWatchContractEvent({
+    address: LUDO_CONTRACT_ADDRESS,
+    abi: ludoAbi,
+    chainId: TARGET_CHAIN_ID,
+    eventName: 'LobbyUpdated',
+    onLogs: (logs) => {
+      void reloadLobbies();
+      logs.forEach((log) => {
+        const gameId = BigInt(log.args.gameId ?? 0);
+        if (selectedGameId && selectedGameId === gameId) {
+          scheduleRefresh(gameId);
+        }
+      });
+    },
+  });
+
+  useWatchContractEvent({
+    address: LUDO_CONTRACT_ADDRESS,
+    abi: ludoAbi,
+    chainId: TARGET_CHAIN_ID,
+    eventName: 'PlayerWon',
+    onLogs: (logs) => {
+      logs.forEach((log) => {
+        const gameId = BigInt(log.args.gameId);
+        const winner = getAddress(log.args.player as Address);
+        winnerByGameRef.current.set(gameId.toString(), { winner, timestamp: Date.now() });
+        if (selectedGameId && selectedGameId === gameId) {
+          scheduleRefresh(gameId);
+        }
+      });
+    },
+  });
+
+  useWatchContractEvent({
+    address: LUDO_CONTRACT_ADDRESS,
+    abi: ludoAbi,
+    chainId: TARGET_CHAIN_ID,
+    eventName: 'PlayerDropped',
+    onLogs: (logs) => {
+      logs.forEach((log) => {
+        const gameId = BigInt(log.args.gameId);
+        if (selectedGameId && selectedGameId === gameId) {
+          scheduleRefresh(gameId);
+        }
+      });
+    },
+  });
+
+  useWatchContractEvent({
+    address: LUDO_CONTRACT_ADDRESS,
+    abi: ludoAbi,
+    chainId: TARGET_CHAIN_ID,
+    eventName: 'PlayerResigned',
+    onLogs: (logs) => {
+      logs.forEach((log) => {
+        const gameId = BigInt(log.args.gameId);
+        if (selectedGameId && selectedGameId === gameId) {
+          scheduleRefresh(gameId);
+        }
+      });
+    },
+  });
+
+  useWatchContractEvent({
+    address: LUDO_CONTRACT_ADDRESS,
+    abi: ludoAbi,
+    chainId: TARGET_CHAIN_ID,
+    eventName: 'DeadlineMissed',
+    onLogs: (logs) => {
+      logs.forEach((log) => {
+        const gameId = BigInt(log.args.gameId);
+        if (selectedGameId && selectedGameId === gameId) {
+          scheduleRefresh(gameId);
+        }
+      });
+    },
+  });
+
+  useWatchContractEvent({
+    address: LUDO_CONTRACT_ADDRESS,
+    abi: ludoAbi,
+    chainId: TARGET_CHAIN_ID,
+    eventName: 'DiceRolled',
+    enabled: Boolean(selectedGameId),
+    onLogs: (logs) => {
+      logs.forEach((log) => {
+        const gameId = BigInt(log.args.gameId);
+        if (selectedGameId && selectedGameId === gameId) {
+          scheduleRefresh(gameId);
+        }
+      });
+    },
+  });
+
+  useWatchContractEvent({
+    address: LUDO_CONTRACT_ADDRESS,
+    abi: ludoAbi,
+    chainId: TARGET_CHAIN_ID,
+    eventName: 'PieceMoved',
+    enabled: Boolean(selectedGameId),
+    onLogs: (logs) => {
+      logs.forEach((log) => {
+        const gameId = BigInt(log.args.gameId);
+        if (selectedGameId && selectedGameId === gameId) {
+          scheduleRefresh(gameId);
+        }
+      });
+    },
+  });
+
+  useWatchContractEvent({
+    address: LUDO_CONTRACT_ADDRESS,
+    abi: ludoAbi,
+    chainId: TARGET_CHAIN_ID,
+    eventName: 'TurnPassed',
+    enabled: Boolean(selectedGameId),
+    onLogs: (logs) => {
+      logs.forEach((log) => {
+        const gameId = BigInt(log.args.gameId);
+        if (selectedGameId && selectedGameId === gameId) {
+          scheduleRefresh(gameId);
+        }
+      });
+    },
+  });
+
+  useWatchContractEvent({
+    address: LUDO_CONTRACT_ADDRESS,
+    abi: ludoAbi,
+    chainId: TARGET_CHAIN_ID,
+    eventName: 'TurnForfeited',
+    enabled: Boolean(selectedGameId),
+    onLogs: (logs) => {
+      logs.forEach((log) => {
+        const gameId = BigInt(log.args.gameId);
+        if (selectedGameId && selectedGameId === gameId) {
+          scheduleRefresh(gameId);
+        }
+      });
+    },
+  });
+
+  const isPlayerSeated = useMemo(() => {
+    if (!gameState || !effectiveAddress) return false;
+    return gameState.players.some((player) => player.address.toLowerCase() === effectiveAddress.toLowerCase());
+  }, [effectiveAddress, gameState]);
+
+  const isPlayerTurn = useMemo(() => {
+    if (!gameState || !effectiveAddress) return false;
+    if (gameState.gameStatus !== 'playing') return false;
+    const current = gameState.players[gameState.currentPlayerIndex];
+    return current ? current.address.toLowerCase() === effectiveAddress.toLowerCase() : false;
+  }, [effectiveAddress, gameState]);
+
+  const resumeLastGame = useCallback(() => {
+    if (!lastKnownGameId) return;
+    setSelectedGameId(lastKnownGameId);
+  }, [lastKnownGameId]);
 
   return {
+    account: effectiveAddress,
+    availableGames,
+    isLoadingAvailableGames: isLoadingLobbies,
+    refetchAvailableGames,
+    selectedGameId,
+    selectGame: setSelectedGameId,
+    lastKnownGameId,
+    resumeLastGame,
     gameState,
+    isGameLoading: isHydratingGame,
     turnTimer,
+    validMoves,
+    pendingAction,
+    isPlayerSeated,
+    isPlayerTurn,
+    isWrongNetwork,
+    createGame,
+    joinGame,
     rollDice,
-    movePieceHandler,
-    getValidMoves,
-    startGame,
-    resetGame
+    movePiece,
+    forcePass,
+    resign,
+    refetchGameState,
   };
 };
+
+export type { LobbySummary, LobbyPlayerSummary };

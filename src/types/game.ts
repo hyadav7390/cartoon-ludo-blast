@@ -15,28 +15,36 @@ export interface GamePiece {
   isInHome: boolean;
   isInHomeColumn: boolean;
   isFinished: boolean;
+  pieceIndex?: number;
 }
 
 export interface Player {
   id: string;
+  address: string;
   name: string;
   color: PlayerColor;
   pieces: GamePiece[];
   isActive: boolean;
-  turnTimer: number;
-  skippedTurns: number;
+  missedDeadlines: number;
+  playerIndex: number;
 }
 
 export interface GameState {
+  gameId: bigint | null;
+  maxPlayers: number;
+  turnDuration: number;
+  turnDeadline: number | null;
   players: Player[];
   currentPlayerIndex: number;
   diceValue: number | null;
   isRolling: boolean;
-  gameStatus: 'waiting' | 'playing' | 'finished';
+  gameStatus: 'waiting' | 'ready' | 'playing' | 'finished';
   winner: Player | null;
   moveHistory: GameMove[];
-  consecutiveSixes: number;
+  sixStreak: number;
   gameMessage: string;
+  roller: string | null;
+  activity: ActivityEntryView[];
 }
 
 export interface GameMove {
@@ -47,6 +55,29 @@ export interface GameMove {
   diceValue: number;
   timestamp: number;
   action: 'move' | 'capture' | 'enter' | 'finish';
+}
+
+export type ActivityKind =
+  | 'dice'
+  | 'move'
+  | 'turnPassed'
+  | 'turnForfeited'
+  | 'playerDropped'
+  | 'playerResigned'
+  | 'playerWon';
+
+export interface ActivityEntryView {
+  id: string;
+  kind: ActivityKind;
+  player: string;
+  dice?: number;
+  pieceIndex?: number;
+  from?: number;
+  to?: number;
+  captured?: boolean;
+  victimPlayerIdx?: number;
+  victimPieceIdx?: number;
+  timestamp: number;
 }
 
 export const BOARD_SIZE = 15;

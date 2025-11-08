@@ -5,15 +5,20 @@ import { getBoardPosition, getHomeColumnPosition, START_POSITIONS, SAFE_SQUARES 
 export const createInitialGameState = (playerCount: number): GameState => {
   const players: Player[] = PLAYER_COLORS.slice(0, playerCount).map((color, index) => ({
     id: `player-${index}`,
+    address: `player-${index}`,
     name: `Player ${index + 1}`,
     color,
     pieces: createInitialPieces(color, index),
     isActive: index === 0,
-    turnTimer: 30,
-    skippedTurns: 0
+    missedDeadlines: 0,
+    playerIndex: index
   }));
 
   return {
+    gameId: null,
+    maxPlayers: playerCount,
+    turnDuration: 30,
+    turnDeadline: null,
     players,
     currentPlayerIndex: 0,
     diceValue: null,
@@ -21,8 +26,10 @@ export const createInitialGameState = (playerCount: number): GameState => {
     gameStatus: 'waiting',
     winner: null,
     moveHistory: [],
-    consecutiveSixes: 0,
-    gameMessage: 'Welcome to Ludo! Click Start Game to begin.'
+    sixStreak: 0,
+    gameMessage: 'Welcome to Ludo! Click Start Game to begin.',
+    roller: null,
+    activity: [],
   };
 };
 
@@ -36,7 +43,8 @@ const createInitialPieces = (color: PlayerColor, playerIndex: number): GamePiece
     boardPosition: -1,
     isInHome: true,
     isInHomeColumn: false,
-    isFinished: false
+    isFinished: false,
+    pieceIndex: i
   }));
 };
 
@@ -145,7 +153,8 @@ export const movePiece = (piece: GamePiece, diceValue: number, allPlayers: Playe
     boardPosition: newBoardPosition,
     isInHome,
     isInHomeColumn,
-    isFinished
+    isFinished,
+    pieceIndex: piece.pieceIndex
   };
 
   return { newPiece, capturedPieces, gameMessage };
