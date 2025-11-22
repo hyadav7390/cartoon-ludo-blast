@@ -19,6 +19,8 @@ export const createInitialGameState = (playerCount: number): GameState => {
     maxPlayers: playerCount,
     turnDuration: 30,
     turnDeadline: null,
+    betAmount: 0n,
+    prizePool: 0n,
     players,
     currentPlayerIndex: 0,
     diceValue: null,

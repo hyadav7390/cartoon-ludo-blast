@@ -10,7 +10,8 @@ import WalletConnectButton from '@/components/wallet/WalletConnectButton';
 import { cn } from '@/lib/utils';
 import { playSound } from '@/utils/gameUtils';
 import type { ActivityEntryView } from '@/types/game';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { formatEther } from 'viem';
 
 const shorten = (value: string) => `${value.slice(0, 6)}...${value.slice(-4)}`;
 
@@ -33,8 +34,8 @@ const LobbyCard: React.FC<{ title: string; description: string; children: React.
 );
 
 const GameLobby: React.FC<{
-  onCreate: (seats: number, turnDuration: number) => void;
-  onJoin: (gameId: bigint) => void;
+  onMatch: (seats: number, turnDuration: number, betAmountEth: string) => void;
+  onJoin: (gameId: bigint, stake?: bigint) => void;
   onEnterGame?: (gameId: bigint) => void;
   availableGames: LobbySummary[];
   isLoading: boolean;
@@ -45,8 +46,10 @@ const GameLobby: React.FC<{
   canResume: boolean;
   resumeGameId?: bigint | null;
   onResume?: () => void;
+  betAmount: string;
+  onBetAmountChange: (value: string) => void;
 }> = ({
-  onCreate,
+  onMatch,
   onJoin,
   onEnterGame,
   availableGames,
@@ -58,32 +61,73 @@ const GameLobby: React.FC<{
   canResume,
   resumeGameId,
   onResume,
+  betAmount,
+  onBetAmountChange,
 }) => {
   const createOptions = [2, 4];
   const durationOptions = [30, 45, 60];
+  const quickBetPresets = ['0.01', '0.05', '0.1'];
 
   return (
-    <LobbyCard title="Choose your adventure" description="Create a new lobby or join an open table.">
-      <div className="flex flex-wrap justify-center gap-2 mb-6">
-        {durationOptions.map((duration) => (
-          <button
-            key={duration}
-            onClick={() => onTurnDurationChange(duration)}
-            className={cn(
-              'px-4 py-2 rounded-full text-sm font-semibold border transition-colors duration-200',
-              selectedTurnDuration === duration
-                ? 'bg-[hsl(var(--primary))] text-white border-[hsl(var(--primary))]'
-                : 'bg-white text-muted-foreground border-border hover:bg-muted'
-            )}
-          >
-            ⏱️ {duration}s turns
-          </button>
-        ))}
+    <LobbyCard title="Choose your adventure" description="Stake your colors, queue a match, or hop into an open arena.">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div className="rounded-2xl bg-white/85 p-4 shadow-lg border border-pink-100">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Bet amount (ETH)</p>
+          <div className="flex items-center gap-3 mt-3">
+            <div className="flex-1 relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Ξ</span>
+              <input
+                type="number"
+                min="0.001"
+                step="0.01"
+                value={betAmount}
+                onChange={(event) => onBetAmountChange(event.target.value)}
+                className="w-full rounded-xl border border-pink-200 bg-white/80 py-2 pl-7 pr-3 text-sm font-semibold focus:border-pink-400 focus:outline-none focus:ring-2 focus:ring-pink-100"
+                placeholder="0.05"
+              />
+            </div>
+            <div className="flex gap-1">
+              {quickBetPresets.map((preset) => (
+                <button
+                  key={preset}
+                  className={cn(
+                    'px-2 py-1 rounded-lg text-xs font-semibold border border-pink-200 text-pink-600 hover:bg-pink-50',
+                    betAmount === preset && 'bg-pink-500 text-white border-pink-500',
+                  )}
+                  onClick={() => onBetAmountChange(preset)}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground mt-2">Winner receives the full prize pool. Funds stay escrowed on-chain until the match ends.</p>
+        </div>
+        <div className="rounded-2xl bg-white/85 p-4 shadow-lg border border-sky-100">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Turn duration</p>
+          <div className="flex flex-wrap gap-2 mt-3">
+            {durationOptions.map((duration) => (
+              <button
+                key={duration}
+                onClick={() => onTurnDurationChange(duration)}
+                className={cn(
+                  'px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-200 bg-white/90 shadow-sm',
+                  selectedTurnDuration === duration
+                    ? 'border-sky-500 text-sky-600 shadow-sky-100'
+                    : 'border-border text-muted-foreground hover:border-sky-200 hover:text-sky-500',
+                )}
+              >
+                ⏱️ {duration}s
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground mt-2">Shorter clocks keep gameplay snappy, longer timers give strategists more room.</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {canResume && resumeGameId && onResume && (
-          <button className="game-button flex flex-col items-center justify-center py-6" onClick={onResume}>
+          <button className="game-button flex flex-col items-center justify-center py-6 bg-gradient-to-r from-amber-100 to-amber-200 text-amber-800 border-amber-200" onClick={onResume}>
             <span className="text-3xl mb-2">🔁</span>
             <span className="text-xl font-bold">Resume Game #{resumeGameId.toString()}</span>
             <span className="text-xs text-muted-foreground mt-1">Jump back into your last table</span>
@@ -92,16 +136,18 @@ const GameLobby: React.FC<{
         {createOptions.map((count) => (
           <button
             key={count}
-            onClick={() => onCreate(count, selectedTurnDuration)}
+            onClick={() => onMatch(count, selectedTurnDuration, betAmount)}
             className={cn(
-              'game-button flex flex-col items-center justify-center py-6',
-              pendingAction === 'create' && 'opacity-60 cursor-wait',
+              'game-button flex flex-col items-center justify-center py-6 bg-white/80',
+              pendingAction === 'match' && 'opacity-60 cursor-wait',
             )}
-            disabled={pendingAction === 'create'}
+            disabled={pendingAction === 'match'}
           >
-            <span className="text-3xl mb-2">{count === 2 ? '👥' : '👨‍👩‍👧‍👦'}</span>
-            <span className="text-xl font-bold">Create {count}-Player Game</span>
-            <span className="text-xs text-muted-foreground mt-1">⏱️ {selectedTurnDuration}s per turn</span>
+            <span className="text-3xl mb-2">{count === 2 ? '🤝' : '🎉'}</span>
+            <span className="text-xl font-bold">Find {count}-Player Match</span>
+            <span className="text-xs text-muted-foreground mt-1">
+              Stake {betAmount || '0'} ETH · ⏱️ {selectedTurnDuration}s turns
+            </span>
           </button>
         ))}
       </div>
@@ -122,6 +168,8 @@ const GameLobby: React.FC<{
               );
               const isFull = lobby.players.length >= lobby.maxPlayers;
               const canEnter = alreadyJoined && Boolean(onEnterGame);
+              const wager = Number(lobby.betAmount ?? 0n) > 0 ? `${formatEther(lobby.betAmount)} ETH` : '—';
+              const pot = Number(lobby.prizePool ?? 0n) > 0 ? `${formatEther(lobby.prizePool)} ETH` : '—';
               return (
                 <button
                   key={lobby.gameId.toString()}
@@ -135,7 +183,7 @@ const GameLobby: React.FC<{
                     if (alreadyJoined && canEnter) {
                       onEnterGame?.(lobby.gameId);
                     } else {
-                      onJoin(lobby.gameId);
+                      onJoin(lobby.gameId, lobby.betAmount);
                     }
                   }}
                   disabled={(!alreadyJoined && (pendingAction === 'join' || isFull)) || (alreadyJoined && !canEnter)}
@@ -164,8 +212,9 @@ const GameLobby: React.FC<{
                   })}
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  {lobby.players.length}/{lobby.maxPlayers} players · ⏱️ {lobby.turnDuration}s turns
+                  {lobby.players.length}/{lobby.maxPlayers} players · ⏱️ {lobby.turnDuration}s · Wager {wager}
                 </span>
+                <span className="text-xs text-emerald-600 font-semibold">Prize Pool: {pot}</span>
                   <span className="text-base font-semibold">
                     {alreadyJoined
                       ? canEnter
@@ -187,8 +236,10 @@ const GameLobby: React.FC<{
 
 export const Game: React.FC = () => {
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [betAmount, setBetAmount] = useState('0.05');
   const [turnDurationSelection, setTurnDurationSelection] = useState(30);
   const navigate = useNavigate();
+  const location = useLocation();
   const { gameId: routeGameIdParam } = useParams<{ gameId?: string }>();
 
   const {
@@ -207,8 +258,8 @@ export const Game: React.FC = () => {
     isPlayerSeated,
     isPlayerTurn,
     isWrongNetwork,
-    createGame,
     joinGame,
+    matchGame,
     rollDice,
     movePiece,
     forcePass,
@@ -216,13 +267,15 @@ export const Game: React.FC = () => {
   } = useGameLogic();
 
   const pendingLabel = pendingAction ?? null;
+  const betDisplay = gameState ? formatEther(gameState.betAmount ?? 0n) : null;
+  const prizeDisplay = gameState ? formatEther(gameState.prizePool ?? 0n) : null;
 
   const activePlayers = useMemo(() => gameState?.players ?? [], [gameState]);
 
   const routeGameId = routeGameIdParam ?? null;
 
   useEffect(() => {
-    if (!routeGameId) return;
+    if (!routeGameId || !account) return;
     try {
       const parsed = BigInt(routeGameId);
       if (selectedGameId === null || selectedGameId !== parsed) {
@@ -231,28 +284,39 @@ export const Game: React.FC = () => {
     } catch {
       navigate('/', { replace: true });
     }
-  }, [navigate, routeGameId, selectGame, selectedGameId]);
+  }, [account, navigate, routeGameId, selectGame, selectedGameId]);
 
   useEffect(() => {
-    if (selectedGameId !== null) {
+    const onGameRoute = location.pathname.startsWith('/game');
+    if (!account && (routeGameId || onGameRoute)) {
+      selectGame(null);
+      navigate('/lobby', { replace: true });
+      return;
+    }
+    if (selectedGameId === null && onGameRoute) {
+      navigate('/lobby', { replace: true });
+      return;
+    }
+    if (selectedGameId !== null && account) {
       const expected = selectedGameId.toString();
       if (routeGameId !== expected) {
         navigate(`/game/${expected}`, { replace: true });
       }
     }
-  }, [navigate, routeGameId, selectedGameId]);
+  }, [account, location.pathname, navigate, routeGameId, selectedGameId, selectGame]);
 
-  const handleCreate = async (count: number, duration: number) => {
+  const handleMatchRequest = async (count: number, duration: number) => {
     try {
-      await createGame(count, duration);
+      await matchGame(count, duration, betAmount);
+      if (soundEnabled) playSound('enter');
     } catch (err) {
-      console.error('createGame failed', err);
+      console.error('matchGame failed', err);
     }
   };
 
-  const handleJoin = async (gameId: bigint) => {
+  const handleJoin = async (gameId: bigint, stake?: bigint) => {
     try {
-      await joinGame(gameId);
+      await joinGame(gameId, stake);
       if (soundEnabled) playSound('enter');
     } catch (err) {
       console.error('joinGame failed', err);
@@ -280,7 +344,7 @@ export const Game: React.FC = () => {
 
   const handleReturnToLobby = () => {
     selectGame(null);
-    navigate('/', { replace: true });
+    navigate('/lobby', { replace: true });
   };
 
   const handleEnterExistingGame = (gameId: bigint) => {
@@ -380,7 +444,26 @@ export const Game: React.FC = () => {
       <div className="flex flex-1 items-center justify-center">
         <LobbyCard title="Welcome to Cartoon Ludo Blast" description="Connect your wallet to enter the arena.">
           <div className="flex justify-center">
-            <WalletConnectButton />
+            <div className="flex items-center gap-2 flex-wrap">
+              <Link to="/" className="game-button text-sm px-4 py-2 bg-white/20 text-white border-white/40">
+                🏠 Home
+              </Link>
+              <Link
+                to="/lobby"
+                className={cn(
+                  'game-button text-sm px-4 py-2',
+                  location.pathname === '/lobby' && 'bg-white text-[hsl(var(--primary))]'
+                )}
+                onClick={() => {
+                  if (selectedGameId !== null) {
+                    selectGame(null);
+                  }
+                }}
+              >
+                🎮 Lobby
+              </Link>
+              <WalletConnectButton />
+            </div>
           </div>
         </LobbyCard>
       </div>
@@ -389,7 +472,7 @@ export const Game: React.FC = () => {
     body = (
       <div className="flex flex-1 items-center justify-center">
         <GameLobby
-          onCreate={handleCreate}
+          onMatch={handleMatchRequest}
           onJoin={handleJoin}
           onEnterGame={handleEnterExistingGame}
           availableGames={availableGames}
@@ -401,6 +484,8 @@ export const Game: React.FC = () => {
           canResume={Boolean(lastKnownGameId)}
           resumeGameId={lastKnownGameId}
           onResume={resumeLastGame}
+          betAmount={betAmount}
+          onBetAmountChange={setBetAmount}
         />
       </div>
     );
@@ -533,6 +618,14 @@ export const Game: React.FC = () => {
               )}
             </div>
 
+            {gameState && (
+              <div className="game-card text-center">
+                <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Prize Pool</p>
+                <p className="text-2xl font-black text-emerald-600 mt-1">{prizeDisplay ?? '0'} ETH</p>
+                <p className="text-xs text-muted-foreground">Stake per player: {betDisplay ?? '0'} ETH</p>
+              </div>
+            )}
+
             <div className="space-y-3">
               {showNoMovesBanner && (
                 <div className="game-card text-center">
@@ -603,6 +696,16 @@ export const Game: React.FC = () => {
             )}
             <h1 className="text-3xl font-bold text-shadow">LUDO</h1>
             <p className="text-muted-foreground font-medium">{headerSubtitle}</p>
+            {gameState && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="px-3 py-1 rounded-full bg-white/20 text-white text-xs font-semibold shadow">
+                  Stake: {betDisplay ?? '0'} ETH / player
+                </span>
+                <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold border border-emerald-200 shadow-inner">
+                  Prize Pool: {prizeDisplay ?? '0'} ETH
+                </span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3 flex-wrap justify-center">
             <WalletConnectButton />

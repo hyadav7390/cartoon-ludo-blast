@@ -34,6 +34,8 @@ export interface GameState {
   maxPlayers: number;
   turnDuration: number;
   turnDeadline: number | null;
+  betAmount: bigint;
+  prizePool: bigint;
   players: Player[];
   currentPlayerIndex: number;
   diceValue: number | null;

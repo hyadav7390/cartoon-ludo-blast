@@ -5,6 +5,7 @@ import {
   decodeErrorResult,
   decodeEventLog,
   getAddress,
+  parseEther,
   zeroAddress,
 } from 'viem';
 import {
@@ -38,7 +39,7 @@ const MAX_OPEN_LOBBIES = 48;
 const ACTIVITY_HISTORY_COUNT = 20;
 const LAST_GAME_STORAGE_KEY = 'ludo:lastGameId';
 
-type PendingAction = 'create' | 'join' | 'roll' | 'move' | 'forcePass' | 'resign' | null;
+type PendingAction = 'create' | 'join' | 'match' | 'roll' | 'move' | 'forcePass' | 'resign' | null;
 
 type LobbyStatus = 'waiting' | 'ready' | 'playing' | 'finished';
 
@@ -58,6 +59,8 @@ interface LobbySummary {
   gameId: bigint;
   maxPlayers: number;
   turnDuration: number;
+  betAmount: bigint;
+  prizePool: bigint;
   creator: Address;
   status: LobbyStatus;
   players: LobbyPlayerSummary[];
@@ -80,8 +83,8 @@ interface UseGameLogicReturn {
   isPlayerSeated: boolean;
   isPlayerTurn: boolean;
   isWrongNetwork: boolean;
-  createGame: (maxPlayers: number, turnDuration: number) => Promise<void>;
-  joinGame: (gameId: bigint) => Promise<void>;
+  joinGame: (gameId: bigint, betAmountWei?: bigint) => Promise<void>;
+  matchGame: (maxPlayers: number, turnDuration: number, betAmountEth: string) => Promise<void>;
   rollDice: () => Promise<void>;
   movePiece: (pieceId: string) => Promise<void>;
   forcePass: () => Promise<void>;
@@ -101,6 +104,8 @@ type ContractLobbyView = {
   turnDuration: number;
   playerCount: number;
   activePlayerCount: number;
+  betAmount: bigint;
+  prizePool: bigint;
   creator: Address;
   players: readonly Address[];
   colors: readonly number[];
@@ -125,6 +130,8 @@ type ContractGameSnapshot = {
   diceValue: number;
   turnDuration: number;
   turnDeadline: bigint;
+  betAmount: bigint;
+  prizePool: bigint;
   roller: Address;
   players: readonly ContractPlayerState[];
 };
@@ -319,6 +326,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
   const [turnTimer, setTurnTimer] = useState(DICE_WAIT_TIMER);
   const [validMoves, setValidMoves] = useState<string[]>([]);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+  const [chainTimeOffset, setChainTimeOffset] = useState(0);
 
   const winnerByGameRef = useRef<Map<string, WinnerRecord>>(new Map());
   const legalMovesCacheRef = useRef<{ key: string; timestamp: number; moves: string[] } | null>(null);
@@ -361,6 +369,16 @@ export const useGameLogic = (): UseGameLogicReturn => {
     }
   }, []);
 
+  useEffect(() => {
+    if (effectiveAddress) return;
+    setSelectedGameId(null);
+    setGameState(null);
+    setValidMoves([]);
+    if (storedGameRef) {
+      clearStoredGameRef();
+    }
+  }, [clearStoredGameRef, effectiveAddress, storedGameRef]);
+
   const scheduleRefresh = useCallback(
     (gameId?: bigint) => {
       const target = gameId ?? selectedGameId;
@@ -381,10 +399,10 @@ export const useGameLogic = (): UseGameLogicReturn => {
 
   const refreshGameSnapshot = useCallback(
     async (gameId: bigint) => {
-      if (!publicClient) return;
+      if (!publicClient || !effectiveAddress) return;
       setIsHydratingGame(true);
       try {
-        const [snapshotRaw, activityRaw] = await Promise.all([
+        const [snapshotRaw, activityRaw, latestBlock] = await Promise.all([
           publicClient.readContract({
             address: LUDO_CONTRACT_ADDRESS,
             abi: ludoAbi,
@@ -412,6 +430,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
               at: bigint;
             }>
           >,
+          publicClient.getBlock({ chainId: TARGET_CHAIN_ID }),
         ]);
 
         const players: Player[] = snapshotRaw.players.map((playerState, index) => {
@@ -495,6 +514,14 @@ export const useGameLogic = (): UseGameLogicReturn => {
           gameStatus = 'finished';
         }
 
+        if (latestBlock?.timestamp !== undefined) {
+          const chainTimestamp = Number(latestBlock.timestamp ?? 0n);
+          if (chainTimestamp > 0) {
+            const nowSeconds = Math.floor(Date.now() / 1000);
+            setChainTimeOffset(nowSeconds - chainTimestamp);
+          }
+        }
+
         const diceValueOrNull = diceValueNumber === 0 ? null : diceValueNumber;
         const currentPlayer = players[currentPlayerIndex];
         const rollerAddress =
@@ -509,6 +536,8 @@ export const useGameLogic = (): UseGameLogicReturn => {
           maxPlayers: Number(snapshotRaw.maxPlayers ?? players.length),
           turnDuration: Number(snapshotRaw.turnDuration ?? DICE_WAIT_TIMER),
           turnDeadline: turnDeadlineNumber === 0 ? null : turnDeadlineNumber,
+          betAmount: snapshotRaw.betAmount ?? 0n,
+          prizePool: snapshotRaw.prizePool ?? 0n,
           players,
           currentPlayerIndex,
           diceValue: diceValueOrNull,
@@ -599,6 +628,8 @@ export const useGameLogic = (): UseGameLogicReturn => {
             gameId: view.gameId,
             maxPlayers: Number(view.maxPlayers ?? players.length),
             turnDuration: Number(view.turnDuration ?? DICE_WAIT_TIMER),
+            betAmount: view.betAmount ?? 0n,
+            prizePool: view.prizePool ?? 0n,
             creator: getAddress(view.creator as Address),
             status: mapGameStatus(Number(view.status ?? 0)),
             players,
@@ -612,7 +643,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
 
       setAvailableGames(
         aggregated
-          .sort((a, b) => Number(b.gameId - a.gameId))
+          .sort((a, b) => (a.gameId < b.gameId ? 1 : -1))
           .slice(0, MAX_OPEN_LOBBIES),
       );
     } catch (error) {
@@ -661,7 +692,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     }
 
     const updateTimer = () => {
-      const now = Math.floor(Date.now() / 1000);
+      const now = Math.floor(Date.now() / 1000) - chainTimeOffset;
       const remaining = Math.max(0, gameState.turnDeadline - now);
       setTurnTimer(remaining);
     };
@@ -669,7 +700,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
     updateTimer();
     const interval = setInterval(updateTimer, 1_000);
     return () => clearInterval(interval);
-  }, [gameState]);
+  }, [chainTimeOffset, gameState]);
 
   useEffect(() => {
     if (!publicClient || selectedGameId === null || !gameState || !effectiveAddress) {
@@ -765,12 +796,14 @@ export const useGameLogic = (): UseGameLogicReturn => {
     async (
       action: PendingAction,
       params:
-        | { functionName: 'createGame'; args: [bigint, bigint] }
-        | { functionName: 'joinGame'; args: [bigint] }
-        | { functionName: 'rollDice'; args: [bigint] }
-        | { functionName: 'movePiece'; args: [bigint, bigint] }
-        | { functionName: 'forcePass'; args: [bigint] }
-        | { functionName: 'resign'; args: [bigint] },
+        (
+          | { functionName: 'joinGame'; args: [bigint] }
+          | { functionName: 'matchGame'; args: [bigint, bigint, bigint] }
+          | { functionName: 'rollDice'; args: [bigint] }
+          | { functionName: 'movePiece'; args: [bigint, bigint] }
+          | { functionName: 'forcePass'; args: [bigint] }
+          | { functionName: 'resign'; args: [bigint] }
+        ) & { value?: bigint },
       successMessage: string,
       options?: SendTransactionOptions,
     ) => {
@@ -800,6 +833,7 @@ export const useGameLogic = (): UseGameLogicReturn => {
           abi: ludoAbi,
           functionName: params.functionName,
           args: params.args,
+          value: params.value,
           chainId: TARGET_CHAIN_ID,
         });
 
@@ -808,29 +842,6 @@ export const useGameLogic = (): UseGameLogicReturn => {
         const receipt = await publicClient.waitForTransactionReceipt({ hash, chainId: TARGET_CHAIN_ID });
 
         toast({ title: 'Success', description: successMessage });
-
-        if (params.functionName === 'createGame') {
-          for (const log of receipt.logs) {
-            try {
-              const { args } = decodeEventLog({
-                abi: ludoAbi,
-                data: log.data,
-                topics: log.topics,
-                eventName: 'GameCreated',
-              });
-              const createdGameId = BigInt(args.gameId);
-              setSelectedGameId(createdGameId);
-              if (effectiveAddress) {
-                const ref = { id: createdGameId, owner: effectiveAddress.toLowerCase() };
-                setStoredGameRef(ref);
-                persistLastGameRef(ref);
-              }
-              break;
-            } catch {
-              // not the GameCreated event
-            }
-          }
-        }
 
         const refreshJobs: Promise<void>[] = [];
         if (refreshLobbies) {
@@ -854,43 +865,19 @@ export const useGameLogic = (): UseGameLogicReturn => {
         setPendingAction(null);
       }
     },
-    [effectiveAddress, isWrongNetwork, persistLastGameRef, publicClient, refetchGameState, reloadLobbies, toast, writeContractAsync],
-  );
-
-  const createGame = useCallback(
-    async (maxPlayers: number, turnDuration: number) => {
-      if (!effectiveAddress) {
-        toast({ title: 'Connect wallet', description: 'Sign in to create a game lobby.' });
-        return;
-      }
-
-      if (isWrongNetwork) {
-        toast({
-          title: 'Wrong network',
-          description: 'Switch to the Sepolia network to create a lobby.',
-          variant: 'destructive',
-        });
-        return;
-      }
-
-      await sendTransaction(
-        'create',
-        { functionName: 'createGame', args: [BigInt(maxPlayers), BigInt(turnDuration)] },
-        'Game lobby created.',
-        { refreshGame: false, refreshLobbies: true },
-      );
-    },
-    [effectiveAddress, isWrongNetwork, sendTransaction, toast],
+    [isWrongNetwork, publicClient, refetchGameState, reloadLobbies, toast, writeContractAsync],
   );
 
   const joinGame = useCallback(
-    async (gameId: bigint) => {
+    async (gameId: bigint, betAmountOverride?: bigint) => {
       if (!effectiveAddress) {
         toast({ title: 'Connect wallet', description: 'Sign in to join the lobby.' });
         return;
       }
 
       const lobby = availableGames.find((game) => game.gameId === gameId);
+      const stake = betAmountOverride ?? lobby?.betAmount ?? 0n;
+
       if (lobby) {
         const alreadyJoined = lobby.players.some(
           (player) => player.address.toLowerCase() === effectiveAddress.toLowerCase(),
@@ -910,11 +897,21 @@ export const useGameLogic = (): UseGameLogicReturn => {
           scheduleRefresh(gameId);
           return;
         }
+
+      }
+
+      if (stake <= 0n) {
+        toast({
+          title: 'Invalid wager',
+          description: 'A non-zero betting amount is required to join.',
+          variant: 'destructive',
+        });
+        return;
       }
 
       await sendTransaction(
         'join',
-        { functionName: 'joinGame', args: [gameId] },
+        { functionName: 'joinGame', args: [gameId], value: stake },
         'Joined the lobby.',
         { refreshGame: false, refreshLobbies: true },
       );
@@ -924,6 +921,46 @@ export const useGameLogic = (): UseGameLogicReturn => {
       persistLastGameRef(ref);
     },
     [availableGames, effectiveAddress, persistLastGameRef, scheduleRefresh, sendTransaction, toast],
+  );
+
+  const matchGame = useCallback(
+    async (maxPlayers: number, turnDuration: number, betAmountEth: string) => {
+      if (!effectiveAddress) {
+        toast({ title: 'Connect wallet', description: 'Sign in to find a match.' });
+        return;
+      }
+
+      if (isWrongNetwork) {
+        toast({
+          title: 'Wrong network',
+          description: 'Switch to the Sepolia network to continue.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const trimmed = betAmountEth.trim();
+      let stake: bigint;
+      try {
+        stake = parseEther(trimmed === '' ? '0' : trimmed);
+      } catch {
+        toast({ title: 'Invalid amount', description: 'Enter a valid numeric value in ETH.', variant: 'destructive' });
+        return;
+      }
+
+      if (stake <= 0n) {
+        toast({ title: 'Invalid wager', description: 'Bet amount must be greater than zero.', variant: 'destructive' });
+        return;
+      }
+
+      await sendTransaction(
+        'match',
+        { functionName: 'matchGame', args: [BigInt(maxPlayers), stake, BigInt(turnDuration)], value: stake },
+        'Matching you with other players…',
+        { refreshLobbies: true },
+      );
+    },
+    [effectiveAddress, isWrongNetwork, sendTransaction, toast],
   );
 
   const rollDice = useCallback(async () => {
@@ -961,13 +998,14 @@ export const useGameLogic = (): UseGameLogicReturn => {
     clearStoredGameRef();
   }, [clearStoredGameRef, selectedGameId, sendTransaction]);
 
-  const isSelectedGameActive = selectedGameId !== null;
+  const isSelectedGameActive = selectedGameId !== null && Boolean(effectiveAddress);
 
   useWatchContractEvent({
     address: LUDO_CONTRACT_ADDRESS,
     abi: ludoAbi,
     chainId: TARGET_CHAIN_ID,
     eventName: 'LobbyUpdated',
+    enabled: Boolean(publicClient),
     onLogs: (logs) => {
       scheduleLobbyReload();
       logs.forEach((log) => {
@@ -979,135 +1017,55 @@ export const useGameLogic = (): UseGameLogicReturn => {
     },
   });
 
-  useWatchContractEvent({
-    address: LUDO_CONTRACT_ADDRESS,
-    abi: ludoAbi,
-    chainId: TARGET_CHAIN_ID,
-    eventName: 'PlayerWon',
-    enabled: isSelectedGameActive,
-    onLogs: (logs) => {
-      logs.forEach((log) => {
-        const gameId = BigInt(log.args.gameId);
-        const winner = getAddress(log.args.player as Address);
-        winnerByGameRef.current.set(gameId.toString(), { winner, timestamp: Date.now() });
-        if (selectedGameId !== null && selectedGameId === gameId) {
-          scheduleRefresh(gameId);
-        }
-      });
-    },
-  });
+  useEffect(() => {
+    if (!publicClient || selectedGameId === null || !isSelectedGameActive) {
+      return;
+    }
 
-  useWatchContractEvent({
-    address: LUDO_CONTRACT_ADDRESS,
-    abi: ludoAbi,
-    chainId: TARGET_CHAIN_ID,
-    eventName: 'PlayerDropped',
-    enabled: isSelectedGameActive,
-    onLogs: (logs) => {
-      logs.forEach((log) => {
-        const gameId = BigInt(log.args.gameId);
-        if (selectedGameId !== null && selectedGameId === gameId) {
-          scheduleRefresh(gameId);
-        }
-      });
-    },
-  });
+    const gameScopedEvents: Array<{ name: 'PlayerWon' | 'PlayerDropped' | 'PlayerResigned' | 'DeadlineMissed' | 'DiceRolled' | 'PieceMoved' | 'TurnPassed' | 'TurnForfeited'; trackWinner?: boolean }> = [
+      { name: 'PlayerWon', trackWinner: true },
+      { name: 'PlayerDropped' },
+      { name: 'PlayerResigned' },
+      { name: 'DeadlineMissed' },
+      { name: 'DiceRolled' },
+      { name: 'PieceMoved' },
+      { name: 'TurnPassed' },
+      { name: 'TurnForfeited' },
+    ];
 
-  useWatchContractEvent({
-    address: LUDO_CONTRACT_ADDRESS,
-    abi: ludoAbi,
-    chainId: TARGET_CHAIN_ID,
-    eventName: 'PlayerResigned',
-    enabled: isSelectedGameActive,
-    onLogs: (logs) => {
-      logs.forEach((log) => {
-        const gameId = BigInt(log.args.gameId);
-        if (selectedGameId !== null && selectedGameId === gameId) {
-          scheduleRefresh(gameId);
-        }
-      });
-    },
-  });
+    const unwatchers = gameScopedEvents.map(({ name, trackWinner }) => {
+      try {
+        return publicClient.watchContractEvent({
+          address: LUDO_CONTRACT_ADDRESS,
+          abi: ludoAbi,
+          eventName: name,
+          args: { gameId: selectedGameId },
+          onLogs: (logs) => {
+            logs.forEach((log) => {
+              const args = log.args as { gameId: bigint; player?: Address };
+              const gameId = BigInt(args.gameId);
+              if (trackWinner && args.player) {
+                const winner = getAddress(args.player);
+                winnerByGameRef.current.set(gameId.toString(), { winner, timestamp: Date.now() });
+              }
+              scheduleRefresh(gameId);
+            });
+          },
+        });
+      } catch (error) {
+        console.error('Failed to watch event', name, error);
+        return undefined;
+      }
+    });
 
-  useWatchContractEvent({
-    address: LUDO_CONTRACT_ADDRESS,
-    abi: ludoAbi,
-    chainId: TARGET_CHAIN_ID,
-    eventName: 'DeadlineMissed',
-    enabled: isSelectedGameActive,
-    onLogs: (logs) => {
-      logs.forEach((log) => {
-        const gameId = BigInt(log.args.gameId);
-        if (selectedGameId !== null && selectedGameId === gameId) {
-          scheduleRefresh(gameId);
+    return () => {
+      unwatchers.forEach((unwatch) => {
+        if (typeof unwatch === 'function') {
+          unwatch();
         }
       });
-    },
-  });
-
-  useWatchContractEvent({
-    address: LUDO_CONTRACT_ADDRESS,
-    abi: ludoAbi,
-    chainId: TARGET_CHAIN_ID,
-    eventName: 'DiceRolled',
-    enabled: isSelectedGameActive,
-    onLogs: (logs) => {
-      logs.forEach((log) => {
-        const gameId = BigInt(log.args.gameId);
-        if (selectedGameId !== null && selectedGameId === gameId) {
-          scheduleRefresh(gameId);
-        }
-      });
-    },
-  });
-
-  useWatchContractEvent({
-    address: LUDO_CONTRACT_ADDRESS,
-    abi: ludoAbi,
-    chainId: TARGET_CHAIN_ID,
-    eventName: 'PieceMoved',
-    enabled: isSelectedGameActive,
-    onLogs: (logs) => {
-      logs.forEach((log) => {
-        const gameId = BigInt(log.args.gameId);
-        if (selectedGameId !== null && selectedGameId === gameId) {
-          scheduleRefresh(gameId);
-        }
-      });
-    },
-  });
-
-  useWatchContractEvent({
-    address: LUDO_CONTRACT_ADDRESS,
-    abi: ludoAbi,
-    chainId: TARGET_CHAIN_ID,
-    eventName: 'TurnPassed',
-    enabled: isSelectedGameActive,
-    onLogs: (logs) => {
-      logs.forEach((log) => {
-        const gameId = BigInt(log.args.gameId);
-        if (selectedGameId !== null && selectedGameId === gameId) {
-          scheduleRefresh(gameId);
-        }
-      });
-    },
-  });
-
-  useWatchContractEvent({
-    address: LUDO_CONTRACT_ADDRESS,
-    abi: ludoAbi,
-    chainId: TARGET_CHAIN_ID,
-    eventName: 'TurnForfeited',
-    enabled: isSelectedGameActive,
-    onLogs: (logs) => {
-      logs.forEach((log) => {
-        const gameId = BigInt(log.args.gameId);
-        if (selectedGameId !== null && selectedGameId === gameId) {
-          scheduleRefresh(gameId);
-        }
-      });
-    },
-  });
+    };
+  }, [isSelectedGameActive, publicClient, scheduleRefresh, selectedGameId]);
 
   const isPlayerSeated = useMemo(() => {
     if (!gameState || !effectiveAddress) return false;
@@ -1161,8 +1119,8 @@ export const useGameLogic = (): UseGameLogicReturn => {
     isPlayerSeated,
     isPlayerTurn,
     isWrongNetwork,
-    createGame,
     joinGame,
+    matchGame,
     rollDice,
     movePiece,
     forcePass,

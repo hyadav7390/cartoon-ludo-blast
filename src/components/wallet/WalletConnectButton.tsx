@@ -13,7 +13,7 @@ import { TARGET_CHAIN_ID } from '@/configs';
 import { cn } from '@/lib/utils';
 
 const WalletConnectButton = () => {
-  const { address, chainId } = useAccount();
+  const { address, chainId, status: accountStatus } = useAccount();
   const { connectors, connectAsync, isLoading: isConnecting, pendingConnector } = useConnect();
   const { disconnect } = useDisconnect();
   const { switchChain, isPending: isSwitching, chains } = useSwitchChain();
@@ -55,7 +55,7 @@ const WalletConnectButton = () => {
 
   const handleConnect = (connector: typeof availableConnectors[number] | undefined) => {
     if (!connector) return;
-    connectAsync({ connector }).catch((error) => {
+    connectAsync({ connector, chainId: TARGET_CHAIN_ID }).catch((error) => {
       console.error('[wallet] Failed to connect', error);
     });
   };
@@ -105,8 +105,15 @@ const WalletConnectButton = () => {
           </DropdownMenu>
         )}
         {!connectorsPresent && (
-          <p className="text-xs text-muted-foreground">Install MetaMask or use WalletConnect to continue.</p>
+          <p className="text-xs text-muted-foreground">
+            Install a Web3 wallet or use WalletConnect on mobile to continue.
+          </p>
         )}
+        <p className="text-[11px] text-muted-foreground">
+          {accountStatus === 'connecting'
+            ? 'Waiting for wallet confirmation…'
+            : 'MetaMask, Coinbase, Rainbow, Trust, and WalletConnect v2 compatible wallets are supported on desktop & mobile.'}
+        </p>
       </div>
     );
   }
